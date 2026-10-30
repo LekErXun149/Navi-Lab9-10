@@ -40,12 +40,30 @@ cfg.kf.maxGap    = 1.0;    % s; time gap larger than this -> re-initialise filte
 cfg.kf.P0pos     = 1.0;    % initial position variance (m^2)
 cfg.kf.P0vel     = 1.0;    % initial velocity variance ((m/s)^2)
 
+%% ---- Site: danger area (fence) and AGV lanes (Phase C) -----------------
+% Update after a new anchor setup. Keep the fence ~0.5 m inside the anchors
+% (accuracy is worst at the anchor boundary) and the lanes near the middle.
+cfg.site.fence = [ 0.5 0.5        % danger-area polygon, corners in order (m)
+                   1.1 6.3
+                  11.5 4.8
+                  11.6 0.5 ];
+% Each lane: AGVs drive from p0 to p1 and loop back to p0 at the end.
+cfg.site.lanes(1).name  = 'Lane 1';  cfg.site.lanes(1).p0 = [ 1.5 3.4];  cfg.site.lanes(1).p1 = [10.5 3.4];
+cfg.site.lanes(2).name  = 'Lane 2';  cfg.site.lanes(2).p0 = [10.5 2.0];  cfg.site.lanes(2).p1 = [ 1.5 2.0];
+cfg.site.laneWidth = 0.6;            % m, width of the lane band (AGV width + margin)
+
 %% ---- Simulated AGVs (Phase C uses the same numbers) -------------------
 cfg.agv.vMax     = 1.0;              % normal speed (m/s)
 cfg.agv.levels   = [1.0 0.5 0.2 0];  % speed fraction for NORMAL, SLOW, CRAWL, STOP
+cfg.agv.names    = {'NORMAL', 'SLOW', 'CRAWL', 'STOP'};
 cfg.agv.decel    = 0.5;              % braking (m/s^2)
 cfg.agv.accel    = 0.3;              % speeding up again (m/s^2)
 cfg.agv.latency  = 0.2;              % command latency MATLAB -> AGV (s), assumed
+cfg.agv.perLane  = 2;                % AGVs on each lane
+cfg.agv.length   = 0.8;              % m
+cfg.agv.width    = 0.5;              % m
+cfg.agv.passMargin = 0.7;            % m: an AGV this far past the person's crossing point is "passed" (E2)
+cfg.agv.minGap   = 0.5;              % m: bumper-to-bumper gap an AGV keeps to the one in front (no collisions)
 
 %% ---- Risk thresholds (Phase B: derived by phaseB_tuning.m) -------------
 % Evidence for each value: TUNING_RESULTS.md. Re-run phaseB_tuning after a new
@@ -62,4 +80,6 @@ cfg.risk.dwell     = 1.0;    % s: release condition must hold this long (E5)
 
 %% ---- Health (inputs to the fail-safe in Phase C) -----------------------
 cfg.health.staleTime = 0.5;   % s without a good update -> data considered stale
+cfg.health.staleLevel = 3;    % E4: while stale, every AGV goes to at least this level (3 = CRAWL)
+cfg.health.maxSigma   = 0.5;  % E4: position uncertainty above this (m) is treated as stale, e.g. filter start-up
 end

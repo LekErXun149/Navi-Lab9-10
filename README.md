@@ -1,10 +1,11 @@
 # UWB AGV safety - MATLAB code
 
 Tag (USB) -> decode Node_Frame2 -> height-corrected trilateration -> Kalman filter
-(position, velocity, speed, heading, uncertainty) -> AGV safety logic (Phase C).
+(position, velocity, speed, heading, uncertainty) -> AGV safety logic -> simulated AGVs.
 
 - **Phase A:** localisation pipeline (decode, trilateration, Kalman filter, live/replay)
 - **Phase B:** risk thresholds derived from recorded data (`phaseB_tuning.m`)
+- **Phase C:** AGV safety logic, simulated AGVs and display (`phaseC_run.m`)
 
 Requires MATLAB R2019b+ (uses `serialport`). No toolboxes needed.
 Also runs in GNU Octave 8 for everything except live serial.
@@ -13,7 +14,7 @@ Also runs in GNU Octave 8 for everything except live serial.
 
 | File | What it does |
 |---|---|
-| `uwb_config.m` | **All settings.** Anchors, tag height, COM port, filter tuning, AGV numbers (`cfg.agv`), risk thresholds (`cfg.risk`) |
+| `uwb_config.m` | **All settings.** Anchors, tag height, COM port, filter tuning, site layout (`cfg.site`), AGV numbers (`cfg.agv`), risk thresholds (`cfg.risk`), fail-safe (`cfg.health`) |
 | `nf2_parse.m` | Decodes raw Node_Frame2 bytes (sync, checksum, split frames) |
 | `nf2_load.m` | Loads a recording: NAssistant export (.xlsx/.csv) or raw log (.bin) |
 | `nf2_empty.m`, `nf2_concat.m`, `nf2_slice.m` | Helpers for the common frame format |
@@ -26,6 +27,14 @@ Also runs in GNU Octave 8 for everything except live serial.
 | `phaseA_live.m` | Live display (or replay) with speed, heading, uncertainty, stale warning; logs everything |
 | `risk_hyst.m` | Hysteresis + dwell for one warning flag (E5): ON at once, OFF only after the release condition holds for the dwell time |
 | `phaseB_tuning.m` | Derives every `cfg.risk` value from recordings, draws the evidence, writes `TUNING_RESULTS.md` |
+| `safety_init.m` | Initial state: lanes, AGVs spread along each lane, warning memories |
+| `safety_step.m` | **The safety logic**, one step: buffer (E3a), time-to-lane (E1), STOP/SLOW per lane with hysteresis (E5), only AGVs heading to the person respond (E2), fail-safe (E4), command latency, AGV motion with no-collision queueing |
+| `safety_run_offline.m` | Runs a recording through localisation + safety logic on a fixed time step (no wall clock) - used by `phaseC_offline` and Phase D |
+| `safety_draw.m` | Phase C display: fence, lanes and AGVs coloured by level, person with buffer, status panel |
+| `phaseC_run.m` | **Main program:** live tag (or replay) -> safety logic -> simulated AGVs, with display and log |
+| `phaseC_offline.m` | Runs the safety system on the recordings; time per level, STOP events, closest distance, timeline figures |
+| `phaseC_selftest.m` | 14 checks of the safety logic with made-up positions |
+| `geo_seg.m`, `geo_poly_dist.m` | Geometry: distance to a lane segment, inside/distance to the fence |
 | `uwb_prctile.m`, `uwb_nansum.m`, `uwb_nanmean.m`, `ternary_str.m` | Small helpers (no Statistics Toolbox needed) |
 | `data/` | The four 26-Oct recordings |
 | `test_fake_serial/` | Fake `serialport` that streams walk 1 - tests live mode without the tag |
@@ -33,18 +42,18 @@ Also runs in GNU Octave 8 for everything except live serial.
 ## Testing the code
 
 Set MATLAB's **Current Folder** to `phaseA`. Type all commands in the **Command Window**.
-Run the tests in order. Repeat the full set after any code change and before each new anchor setup.
-
-| Step | Needs |
-|---|---|
-| 0. Self-test | Nothing |
-| 1. Offline run | Nothing |
-| 2. Replay | Nothing |
-| 3. Live path with fake port | Nothing |
-| 4. Real tag, no anchors | Tag + USB cable |
-| 5. Full system | Tag + 4 anchors |
-
+Run the tests in order. Repeat them after any code change and before each new anchor setup.
 Record results in `TEST_STATUS.md`, not here.
+
+| Group | Tests | Needs |
+|---|---|---|
+| Phase A | 0 self-test, 1 offline, 2 replay, 3 fake port | Nothing |
+| Phase A | 4 real tag, no anchors | Tag + USB cable |
+| Phase A | 5 full system | Tag + 4 anchors |
+| Phase B | B-1 to B-4 tuning | Nothing |
+| Phase C | C-1 to C-4 | Nothing |
+| Phase C | C-5 real tag, no anchors | Tag + USB cable |
+| Phase C | C-6 full system | Tag + 4 anchors |
 
 ### 0. Self-test - checks every building block
 ```matlab
@@ -111,6 +120,91 @@ If the counter stays at 0: NAssistant still open, wrong COM number, or tag not a
 With anchors running: stand on a taped point and compare the shown position with the
 tape; stand still 30 s (speed ~0, data OK); walk a short line (speed ~0.5-1 m/s).
 
+### Phase B tests
+
+**B-1 Default tuning run.** `phaseB_tuning`
+**Pass:** about 2 minutes, four evidence figures, ends with `uwb_config.m is up to date`,
+`TUNING_RESULTS.md` updated.
+
+**B-2 Values.** Open `TUNING_RESULTS.md`. **Pass:** vApproach 0.50, tStop 3.0, tSlow 4.0,
+buffer 0.4 m + 2 sigma, cap 1.25 m, gap 0.45 m, dwell 1.0 s.
+
+**B-3 Re-tune with chosen files, including a raw `.bin`** (the route used after a new anchor setup).
+Find a `.bin` from test 3 with `dir logs/*.bin` (repeat test 3 if there is none), then:
+```matlab
+files    = {'data/underA3_1620.xlsx', 'logs/raw_<time>.bin'};
+isStatic = [true false];
+truthXY  = [12.093 0; NaN NaN];
+phaseB_tuning
+```
+**Pass:** runs without errors and prints the recommendation table. `<-- update` marks are
+expected here - do not copy these values into `uwb_config.m`.
+
+**B-4 Back to the defaults.**
+```matlab
+clear files isStatic truthXY
+phaseB_tuning
+```
+**Pass:** ends with `uwb_config.m is up to date`; `TUNING_RESULTS.md` lists the four 26-Oct recordings.
+
+### Phase C tests
+
+**C-1 Safety logic self-test.**
+```matlab
+phaseC_selftest
+```
+**Pass:** `14 PASS, 0 FAIL`. Made-up positions check: outside the fence -> NORMAL; person in
+Lane 1 -> only the AGV heading to them STOPs, the one that has passed stays NORMAL, Lane 2
+only SLOW (E2); braking time; command latency; a fast walker triggers STOP further from the
+lane than a slow one (E1); data lost -> CRAWL, a STOP is kept, high uncertainty counts as
+lost (E4); larger uncertainty -> larger buffer (E3a); no flicker on a boundary (E5);
+outside the fence next to a lane end -> NORMAL; an AGV queues behind a stopped AGV.
+
+**C-2 Offline run on the recordings.**
+```matlab
+phaseC_offline
+```
+**Pass:** three figures (map + level timeline per recording), no errors. Printed table close to:
+
+| Recording | Check |
+|---|---|
+| `walk1_1704` | fence INSIDE ~64% of the time; L1-A STOP ~47%, L2-A STOP ~11% |
+| `walk2` | fence INSIDE ~36%; every AGV NORMAL 74-85% |
+| `static_1533` | person stands near the Lane 1 end: L1-A/L1-B STOP ~99%, Lane 2 AGVs mostly NORMAL (they drive away from the person) |
+
+**C-3 Replay with display.** In `phaseC_run.m` set `MODE = "replay";`, then `phaseC_run`.
+
+| Check | Pass if |
+|---|---|
+| Layout | Anchors, red dashed fence, two lanes with direction arrows, four AGVs |
+| Colours | Lanes and AGVs change green / amber / red as the person gets near |
+| Direction rule (E2) | When the person is at a lane, the AGV that has already passed stays green and keeps moving |
+| No collisions | AGVs never overlap; a following AGV shows `queued` and waits |
+| Panel | Distance, TTL and reason per lane; level and speed per AGV |
+| End | Closing the window prints the time per level and saves `logs/phaseC_<time>.mat` |
+
+**C-4 Live path with the fake serial port.** Set `MODE = "serial";`, then:
+```matlab
+addpath('test_fake_serial')
+phaseC_run
+rmpath('test_fake_serial')
+clear classes
+```
+**Pass:** walk 1 plays at ~20x, the display behaves as in C-3, no errors. Then close the
+window. `which serialport` must point into MATLAB's toolbox folder again.
+
+**C-5 Real tag, no anchors - fail-safe (E4).** Plug in the tag, close NAssistant, `MODE = "serial";`, `phaseC_run`.
+
+| Check | Pass if |
+|---|---|
+| No position | Panel shows `DATA STALE -> fail-safe`, every AGV slows to CRAWL (0.2 m/s), orange |
+| Unplug USB | Still CRAWL, MATLAB does not crash |
+| Port release | Close the window, run again - reconnects without "port in use" |
+
+**C-6 Full system - after a new anchor setup.** Update `cfg.site` to the taped fence and
+lanes, then walk the live demo script (outside -> parallel -> slow approach -> fast approach
+-> into Lane 1 -> stand at the edge -> unplug -> walk out) and check each response.
+
 ## Tuning the risk thresholds (Phase B)
 
 ```matlab
@@ -145,6 +239,31 @@ phaseB_tuning
    prints `uwb_config.m is up to date`. Run `clear files isStatic truthXY` to go back to
    the 26-Oct recordings.
 
+## Running the safety system (Phase C)
+
+```matlab
+phaseC_run
+```
+`MODE = "serial"` for the live tag, `"replay"` for a recording (`REPLAYFILE`, `REPLAYSPEED`).
+Close the figure to stop; the log is saved to `logs/phaseC_<time>.mat` and, live, the raw
+bytes to `logs/raw_<time>.bin`.
+
+Levels: 1 NORMAL (100%), 2 SLOW (50%), 3 CRAWL (20%), 4 STOP, from `cfg.agv.levels`.
+
+| Rule | Behaviour |
+|---|---|
+| Fence | Person outside `cfg.site.fence` -> every AGV NORMAL |
+| Buffer (E3a) | `B = min(bufBase + bufK * sigmaPos, bufMax)`; residual (E3b) enters through the filter's measurement noise |
+| STOP | distance to lane edge `< B`, or time-to-lane `< tStop` |
+| SLOW | distance `< B + slowBand`, or time-to-lane `< tSlow` |
+| Time-to-lane (E1) | distance / speed towards the lane, only if that speed `> vApproach` |
+| Direction (E2) | Only an AGV that has not yet passed the person's crossing point (by more than `passMargin`) takes the lane's level |
+| Hysteresis (E5) | Each condition ON at once, OFF only when clear by `hystGap` for `dwell` seconds |
+| Fail-safe (E4) | No data for `staleTime`, filter stale, or `sigmaPos > maxSigma` -> every AGV at least CRAWL; a STOP is kept |
+| AGVs | Commands arrive after `latency`; brake/accelerate at `decel`/`accel`; keep `minGap` to the AGV in front |
+
+`out.overall` (highest level any AGV acts on) is the value for the Leonardo warning light (Phase E).
+
 ## Running live
 
 Close NAssistant, check `cfg.serial.port`, `MODE = "serial"`, run `phaseA_live`.
@@ -155,4 +274,5 @@ Close the figure to stop. Data saved to `logs/run_*.mat` and raw bytes to `logs/
 - `cfg.anchor.xy` - new coordinates from NAssistant
 - `cfg.anchor.h`, `cfg.tag.h` - measured heights
 - `cfg.serial.port`
+- `cfg.site` - fence corners and lane start/end points, measured on the floor
 - `cfg.risk` - after re-tuning (see "Tuning the risk thresholds")

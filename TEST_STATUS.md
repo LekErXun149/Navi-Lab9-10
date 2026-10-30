@@ -1,12 +1,22 @@
-# Phase A - test status
+# Test status
 
 Test procedures are in `README.md` ("Testing the code"). This file records results only.
 
 | Step | Result | Date | Notes |
 |---|---|---|---|
-| 0. Self-test | PASS (15/15) | 28-Oct | MATLAB. Now 17 checks (hysteresis added 29-Oct): re-run |
+| 0. Self-test | PASS (17/17) | 29-Oct | MATLAB |
 | 1. Offline run | PASS | 28-Oct | |
 | 2. Replay | PASS | 28-Oct | |
 | 3. Live path with fake port | PASS | 28-Oct | 1304 frames, 0 bad checksums |
 | 4. Real tag, no anchors | PASS | 29-Oct | Connected, 461 frames, anchors 0, data STALE (expected) |
 | 5. Full system | Not run | | Needs a new anchor setup |
+| B-1 Default tuning run | PASS | 29-Oct | up to date |
+| B-2 Values | PASS | 29-Oct | |
+| B-3 Re-tune with chosen files (.bin) | PASS | 29-Oct | |
+| B-4 Back to defaults | PASS | 29-Oct | |
+| C-1 Safety logic self-test | Not run | | |
+| C-2 Offline run | Not run | | |
+| C-3 Replay with display | Not run | | |
+| C-4 Fake serial port | Not run | | |
+| C-5 Real tag, no anchors (fail-safe) | Not run | | |
+| C-6 Full system | Not run | | Needs a new anchor setup |
