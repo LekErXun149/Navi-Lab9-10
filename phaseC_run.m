@@ -4,7 +4,7 @@
 % Saves logs/phaseC_<time>.mat, the event log logs/phaseC_<time>_events.csv and
 % _visits.csv (open in Excel); in serial mode also the raw bytes logs/raw_<time>.bin.
 
-MODE        = "serial";                 % "serial" (live tag) or "replay"
+MODE        = "replay";                 % "serial" (live tag) or "replay"
 REPLAYFILE  = "data/walk2.xlsx";        % used when MODE = "replay"
 REPLAYSPEED = 1;                        % 1 = real time, 2 = double speed
 

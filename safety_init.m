@@ -12,7 +12,7 @@ for l = 1:nL
     S.lane(l).L = norm(b - a);
     S.lane(l).u = (b - a) / S.lane(l).L;                 % driving direction
     S.lane(l).nrm = [-S.lane(l).u(2) S.lane(l).u(1)];    % sideways unit vector
-    S.lane(l).mem = {[], [], [], []};                    % hysteresis memories (E5): stop-dist, stop-TTL, slow-dist, slow-TTL
+    S.lane(l).mem = {[], [], [], [], []};                % hysteresis memories (E5): stop-dist, stop-TTL, slow-dist, slow-TTL, entry
 end
 
 k = 0;
@@ -31,6 +31,7 @@ for l = 1:nL
 end
 
 S.memFence = [];
+S.fenceWasOn = false; S.tFenceOn = -Inf;   % entry rule
 S.est = [];               % latest position estimate
 S.tsLastFrame = -Inf;     % sim time when the last frame arrived
 S.ts = NaN;               % sim time of the last step

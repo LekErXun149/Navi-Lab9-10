@@ -14,16 +14,24 @@ function [S, out] = safety_step(S, ts, est, cfg)
 %     Each of the four conditions switches ON at once and OFF only when it is
 %     clear (distance: hystGap further out) for 'dwell' seconds          (E5)
 %   Person outside the fence -> all lanes NORMAL.
-%   Per AGV: only an AGV that has not yet passed the person's crossing point
-%   takes its lane's level; an AGV that has passed stays NORMAL           (E2)
+%   Entry rule: for entryHold s after the person enters the fence, every lane
+%   within entryReach is STOP (speed estimate not yet reliable after a turn).
+%   Per AGV: only an AGV whose REAR has not yet passed the person's crossing
+%   point by passMargin takes its lane's level; one that has passed stays NORMAL (E2)
 %   No data for staleTime, filter stale, or sigmaPos > maxSigma -> every AGV
 %   at least staleLevel, a STOP is kept                                  (E4)
+%   cfg.policy (optional, Phase D comparisons): mode 'basic' = every AGV STOPs
+%   whenever the person is inside the fence; E1/E2/E3/E5 = false switches that
+%   enhancement off (E3 off -> fixed buffer cfg.policy.fixedBuf).
 %   Commands reach the AGV after cfg.agv.latency; AGVs brake/accelerate at
 %   cfg.agv.decel / accel, keep cfg.agv.minGap to the AGV in front (out.queued).
 %   After the lane end an AGV returns out of sight and re-enters along a feeder
 %   track of cfg.agv.feedLen before p0 (s < 0), where the rules already apply.
 
 R = cfg.risk; nL = numel(S.lane); nA = numel(S.agv);
+P = struct('mode', 'full', 'E1', true, 'E2', true, 'E3', true, 'E5', true, 'fixedBuf', 0.72);
+if isfield(cfg, 'policy'), P = cfg.policy; end          % Phase D: basic system / switch off E1-E5
+if ~P.E5, gapH = 0; dwellH = 0; else, gapH = R.hystGap; dwellH = R.dwell; end
 if isnan(S.ts), dt = 0; else, dt = max(0, ts - S.ts); end
 S.ts = ts;
 if ~isempty(est), S.est = est; S.tsLastFrame = ts; end
@@ -39,27 +47,32 @@ out.fenceOn = false; out.B = NaN; out.pos = [NaN NaN];
 %% ---- warnings per lane (only with trustworthy data) ---------------------
 if ~stale
     p = S.est.pos; v = S.est.vel;
-    B = min(R.bufBase + R.bufK * S.est.sigmaPos, R.bufMax);
+    if P.E3, B = min(R.bufBase + R.bufK * S.est.sigmaPos, R.bufMax);
+    else,    B = P.fixedBuf; end
     out.B = B; out.pos = p;
     [inside, dF] = geo_poly_dist(p, cfg.site.fence);
-    [fenceOn, S.memFence] = risk_hyst(inside, ts, ~inside && dF > R.hystGap, R.dwell, S.memFence);
+    [fenceOn, S.memFence] = risk_hyst(inside, ts, ~inside && dF > gapH, dwellH, S.memFence);
     out.fenceOn = fenceOn;
+    if fenceOn && ~S.fenceWasOn, S.tFenceOn = ts; end           % entry time (entry rule)
+    S.fenceWasOn = fenceOn;
+    entry = fenceOn && (ts - S.tFenceOn) < R.entryHold && ~strcmp(P.mode, 'basic');
     for l = 1:nL
         [dc, sp, ~, n] = geo_seg(p, S.lane(l).a, S.lane(l).b);
         d = dc - cfg.site.laneWidth / 2;                   % to the lane edge (<0 = in the lane)
         vT = -dot(n, v);                                   % speed towards the lane
         if d <= 0, ttl = 0;
-        elseif vT > R.vApproach, ttl = d / vT;
+        elseif vT > R.vApproach && P.E1, ttl = d / vT;
         else, ttl = Inf; end
         % distance and time-to-lane warnings each have their own hysteresis (E5)
-        cond = [d < B,               ttl < R.tStop, d < B + R.slowBand,                ttl < R.tSlow];
-        rel  = [d > B + R.hystGap,   ttl >= R.tStop, d > B + R.slowBand + R.hystGap,   ttl >= R.tSlow];
-        on = false(1, 4);
-        for f = 1:4
-            [on(f), S.lane(l).mem{f}] = risk_hyst(cond(f), ts, rel(f), R.dwell, S.lane(l).mem{f});
+        cE   = entry && d < R.entryReach;                  % just entered, lane within walking reach
+        cond = [d < B,               ttl < R.tStop, d < B + R.slowBand,                ttl < R.tSlow,  cE];
+        rel  = [d > B + gapH,        ttl >= R.tStop, d > B + R.slowBand + gapH,        ttl >= R.tSlow, ~cE];
+        on = false(1, 5);
+        for f = 1:5
+            [on(f), S.lane(l).mem{f}] = risk_hyst(cond(f), ts, rel(f), dwellH, S.lane(l).mem{f});
         end
-        lvlOf = [4 4 2 2];
-        names = {'in lane / buffer', 'approaching fast', 'near lane', 'approaching'};
+        lvlOf = [4 4 2 2 4];
+        names = {'in lane / buffer', 'approaching fast', 'near lane', 'approaching', 'just entered'};
         lvl = 1; why = '';
         if any(on)
             lvl = max(lvlOf(on));
@@ -68,6 +81,9 @@ if ~stale
             if isempty(g), why = [names{f(1)} ' (holding)'];
             else, why = names{g(1)}; end
             if ~isempty(g) && any(g(1) == [2 4]), why = sprintf('%s, TTL %.1f s', why, ttl); end
+        end
+        if strcmp(P.mode, 'basic')                          % comparison: stop all inside the fence
+            lvl = 1 + 3 * fenceOn; why = 'basic: person inside fence';
         end
         if ~fenceOn, lvl = 1; why = 'outside fence'; end
         out.lane(l).d = d; out.lane(l).ttl = ttl; out.lane(l).B = B; out.lane(l).sp = sp;
@@ -81,8 +97,9 @@ for k = 1:nA
     if stale
         want = max(S.agv(k).desired, cfg.health.staleLevel);       % E4 (keeps a STOP)
     else
-        ahead = out.lane(l).sp - S.agv(k).s;                       % >0: person still ahead
-        if ahead > -cfg.agv.passMargin, want = out.lane(l).level;  % E2
+        ahead = out.lane(l).sp - (S.agv(k).s - cfg.agv.length / 2);   % person vs AGV REAR
+        if ahead > -cfg.agv.passMargin || ~P.E2 || strcmp(P.mode, 'basic')
+            want = out.lane(l).level;                              % E2: only if not yet passed
         else, want = 1; end
     end
     S.agv(k).desired = want;

@@ -17,9 +17,11 @@ T(end+1, :) = {'outside fence: all AGVs NORMAL', all(o.applied == NORMAL)};
 %% 2. Person standing in Lane 1 -> only the AGV still heading to them stops (E2)
 S = safety_init(cfg);
 S.agv(idx(S, 'L1-A')).s = 1.0;      % x = 3.5, person (x = 6) ahead of it
-S.agv(idx(S, 'L1-B')).s = 6.0;      % x = 8.5, already 2.5 m past the person
+S.agv(idx(S, 'L1-B')).s = 5.0;      % x = 7.5, rear already 1.1 m past the person
+S.agv(idx(S, 'L2-A')).s = 1.0;      % Lane 2 runs right->left: x = 8.5, person ahead
+S.agv(idx(S, 'L2-B')).s = 5.0;      % x = 4.5, rear already 1.1 m past the person
 S.agv(idx(S, 'L1-A')).v = cfg.agv.vMax;   % moving at full speed
-for ts = 0:dt:1.0, [S, o] = safety_step(S, ts, mk([6 3.4], [0 0]), cfg); end
+for ts = 0:dt:3.0, [S, o] = safety_step(S, ts, mk([6 3.4], [0 0]), cfg); end   % after the entry rule
 T(end+1, :) = {'in Lane 1: approaching AGV L1-A STOPs', o.applied(idx(S, 'L1-A')) == STOP};
 T(end+1, :) = {'in Lane 1: AGV L1-B that has passed stays NORMAL', o.applied(idx(S, 'L1-B')) == NORMAL};
 T(end+1, :) = {'in Lane 1: Lane 2 (1.4 m away) only SLOW for approaching AGV', ...
@@ -27,7 +29,8 @@ T(end+1, :) = {'in Lane 1: Lane 2 (1.4 m away) only SLOW for approaching AGV', .
 
 %% 3. Braking: L1-A stands still within latency + vMax/decel
 tLimit = cfg.agv.latency + cfg.agv.vMax / cfg.agv.decel + 0.1;
-for ts = 1.04:dt:tLimit, [S, o] = safety_step(S, ts, mk([6 3.4], [0 0]), cfg); end
+S.agv(idx(S, 'L1-A')).v = cfg.agv.vMax; t1 = ts;
+for ts = t1 + dt:dt:t1 + tLimit, [S, o] = safety_step(S, ts, mk([6 3.4], [0 0]), cfg); end
 T(end+1, :) = {sprintf('braking: L1-A at 0 m/s within %.1f s', tLimit), o.v(idx(S, 'L1-A')) == 0};
 
 %% 4. Command latency: level changes reach the AGV after cfg.agv.latency
@@ -40,13 +43,15 @@ T(end+1, :) = {sprintf('latency: STOP applied after %.1f s, not before', cfg.agv
     early == NORMAL && o.applied(idx(S, 'L1-A')) == STOP};
 
 %% 5. Fast approach triggers STOP further from the lane than a slow one (E1)
+% Larger fence so the walk starts outside it and the entry rule is not involved.
+cfgE = cfg; cfgE.site.fence = [0 -2; 0 9; 12 9; 12 -2];
 dStop = nan(1, 2); speeds = [1.2 0.3];
 for c = 1:2
-    S = safety_init(cfg); S.agv(idx(S, 'L1-A')).s = 1.0;
-    p = [6 3.7 + 1.7];  v = [0 -speeds(c)];                  % 1.7 m above Lane 1 edge
-    for ts = 0:dt:10
+    S = safety_init(cfgE); S.agv(idx(S, 'L1-A')).s = 1.0;
+    p = [6 9.5];  v = [0 -speeds(c)];                    % starts 0.5 m outside the fence
+    for ts = 0:dt:30
         p = p + v * dt;
-        [S, o] = safety_step(S, ts, mk(p, v), cfg);
+        [S, o] = safety_step(S, ts, mk(p, v), cfgE);
         if o.lane(1).level == STOP, dStop(c) = o.lane(1).d; break; end
     end
 end
@@ -122,6 +127,14 @@ for ts = 0:dt:12
 end
 T(end+1, :) = {sprintf('re-entering AGV stops before the person (closest moving %.1f m)', dMin), ...
     dMin > cfg.agv.length / 2 + 0.3 && S.agv(iA).v == 0 && S.agv(iA).s < 0};
+
+%% 13b. Entry rule: just inside the fence near a lane -> STOP at first, then released
+S = safety_init(cfg); lv = [];
+for ts = 0:dt:6
+    [S, o] = safety_step(S, ts, mk([6 3.7 + 1.5], [0 0]), cfg);   % 1.5 m from Lane 1, standing
+    lv(end+1) = o.lane(1).level; %#ok<AGROW>
+end
+T(end+1, :) = {'entry rule: STOP for the first 1.5 s, then only SLOW', lv(5) == STOP && lv(end) == SLOW};
 
 %% 14. Event log: walk in from outside the fence, stand in Lane 1, walk out
 S = safety_init(cfg); EV = [];

@@ -64,7 +64,7 @@ cfg.agv.latency  = 0.2;              % command latency MATLAB -> AGV (s), assume
 cfg.agv.perLane  = 2;                % AGVs on each lane
 cfg.agv.length   = 0.8;              % m
 cfg.agv.width    = 0.5;              % m
-cfg.agv.passMargin = 0.7;            % m: an AGV this far past the person's crossing point is "passed" (E2)
+cfg.agv.passMargin = 0.7;            % m: an AGV whose REAR is this far past the person's crossing point is "passed" (E2)
 cfg.agv.minGap   = 0.5;              % m: bumper-to-bumper gap an AGV keeps to the one in front (no collisions)
 cfg.agv.feedLen  = 3.0;              % m: feeder track before each lane start; must exceed latency travel +
                                      %    braking distance (0.2 + 1.0 m at 1 m/s) so a re-entering AGV can stop
@@ -72,15 +72,25 @@ cfg.agv.feedLen  = 3.0;              % m: feeder track before each lane start; m
 %% ---- Risk thresholds (Phase B: derived by phaseB_tuning.m) -------------
 % Evidence for each value: TUNING_RESULTS.md. Re-run phaseB_tuning after a new
 % anchor setup, or after changing the filter settings or the AGV numbers above.
-cfg.risk.vApproach = 0.50;   % m/s: slower approach than this is "not approaching" (distance zones still apply)
-cfg.risk.tStop     = 3.0;    % s: time-to-lane below this -> STOP
-cfg.risk.tSlow     = 4.0;    % s: time-to-lane below this -> SLOW
+cfg.risk.vApproach = 0.15;   % m/s: slower approach than this is "not approaching" (distance zones still apply)
+cfg.risk.tStop     = 2.5;    % s: time-to-lane below this -> STOP
+cfg.risk.tSlow     = 3.5;    % s: time-to-lane below this -> SLOW
 cfg.risk.bufBase   = 0.40;   % m: fixed part of the safety buffer (covers bias)
 cfg.risk.bufK      = 2.0;    % buffer = bufBase + bufK * sigmaPos   (E3a)
 cfg.risk.bufMax    = 1.25;   % m: cap on the buffer
-cfg.risk.slowBand  = 1.00;   % m: extra distance beyond the buffer that is SLOW (design choice)
+cfg.risk.slowBand  = 1.30;   % m: SLOW zone beyond the buffer; B + slowBand = 0.8 m/s x tStop (Phase B, B4)
 cfg.risk.hystGap   = 0.45;   % m: release only when this much further out (E5)
 cfg.risk.dwell     = 1.0;    % s: release condition must hold this long (E5)
+cfg.risk.entryHold  = 1.5;   % s: after entering the fence, lanes within entryReach STOP (Phase D finding:
+cfg.risk.entryReach = 2.0;   % m  the speed estimate lags ~1 s after a turn). = 0.8 m/s walk x tStop (B4)
+
+%% ---- Safety policy (Phase D compares versions; keep 'full' for normal use) --
+cfg.policy.mode     = 'full';  % 'full' = this project's system, 'basic' = stop all AGVs inside the fence
+cfg.policy.E1       = true;    % time-to-lane prediction
+cfg.policy.E2       = true;    % only AGVs heading to the person respond
+cfg.policy.E3       = true;    % uncertainty-sized buffer (false -> fixedBuf)
+cfg.policy.E5       = true;    % hysteresis + dwell
+cfg.policy.fixedBuf = 0.72;    % m, buffer used when E3 is off (= bufBase + bufK x typical sigma 0.16)
 
 %% ---- Health (inputs to the fail-safe in Phase C) -----------------------
 cfg.health.staleTime = 0.5;   % s without a good update -> data considered stale

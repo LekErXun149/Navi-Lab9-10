@@ -1,6 +1,6 @@
 %% phaseC_offline.m - run the full safety system on recordings (no hardware, no wall clock).
 % For each recording: time each AGV spends at each level, number of STOP events,
-% closest person-AGV distance (AGV on the lane), a timeline figure, and the event
+% closest person-AGV distance (AGV on the lane, faster than CRAWL), a timeline figure, and the event
 % log written to logs/<recording>_events.csv and _visits.csv.
 if ~exist('doPlot', 'var'), doPlot = true; end
 cfg = uwb_config();
@@ -16,12 +16,13 @@ for r = 1:numel(recs)
     S0 = safety_init(cfg); nA = numel(S0.agv); n = numel(Lg.t);
     fprintf('\n=== %s: %.0f s, fence INSIDE %.0f%% of the time, stale %.1f%%\n', ...
         recs{r}, Lg.t(end) - Lg.t(1), 100 * mean(Lg.fenceOn), 100 * mean(Lg.stale));
-    fprintf('    AGV     NORMAL  SLOW  CRAWL  STOP | STOP events | closest to person\n');
+    fprintf('    AGV     NORMAL  SLOW  CRAWL  STOP | STOP events | closest to person (AGV faster than CRAWL)\n');
     for a = 1:nA
         Ln = S0.lane(S0.agv(a).lane);
         xy = Ln.a + Lg.s(:, a) * Ln.u;
         dd = hypot(xy(:, 1) - Lg.pos(:, 1), xy(:, 2) - Lg.pos(:, 2));
-        dmin = min(dd(Lg.s(:, a) >= 0));          % on the lane only (feeder track is virtual)
+        mv = Lg.s(:, a) >= 0 & Lg.v(:, a) > cfg.agv.vMax * cfg.agv.levels(3);  % on the lane, faster than CRAWL
+        dmin = min([dd(mv); Inf]);
         c = histc(Lg.applied(:, a), 1:4) / n * 100;
         ev = sum(diff([0; Lg.applied(:, a) == 4]) == 1);
         fprintf('    %-6s  %5.0f%% %4.0f%% %5.0f%% %4.0f%% | %6d      | %5.2f m\n', Lg.agvNames{a}, c, ev, dmin);
