@@ -41,7 +41,7 @@ dBad = d; dBad(1) = dBad(1) + 1.0;
 ok = info.resRMS > 0.2;                                        T(end+1,:) = {'trilat: 1 m range error -> large residual (E3b)', ok};
 
 %% 3. Kalman filter: straight walk at 0.8 m/s with 15 cm noise
-randn('seed', 1); rand('seed', 1); %#ok<RAND>
+rng(1, 'twister');                 % modern generator (legacy rand('seed') breaks rng later)
 dt = 0.04; t = (0:dt:20)'; v = [0.8 0];
 P = [1 2.5] + t * v;
 Z = P + 0.15 * randn(size(P));

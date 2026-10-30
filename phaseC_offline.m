@@ -61,7 +61,7 @@ for r = 1:numel(recs)
             end
         end
         plot(tt(Lg.stale), 0.4 + 0 * tt(Lg.stale), 'k.', 'MarkerSize', 4);
-        set(gca, 'YTick', 0.4:1:nA, 'YTickLabel', [{'stale'} Lg.agvNames], 'YLim', [0 nA + 0.6]);
+        set(gca, 'YTick', [0.4 1:nA], 'YTickLabel', [{'stale'} Lg.agvNames], 'YLim', [0 nA + 0.6]);
         xlabel('time (s)'); title('Level each AGV acts on (green NORMAL, amber SLOW, orange CRAWL, red STOP)');
     end
 end
