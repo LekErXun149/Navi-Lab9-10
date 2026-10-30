@@ -1,21 +1,29 @@
 %% phaseD_view.m - watch one Phase D scenario run with the live display.
 % Shows the same display as phaseC_run, plus the TRUE person position (black x)
 % and the true path (dashed). Useful to understand a result or to record a video.
-% Change the settings below, then run. Close the figure to stop early.
+% Close the figure to stop early.
+% Pick the run from the Command Window, e.g.:
+%   SCENARIO = 'S13'; phaseD_view
+%   SCENARIO = 'S6'; PROFILE = 'worst'; VERSION = 'basic'; phaseD_view
+% A setting you have not typed uses the default below. Type  clear SCENARIO PROFILE
+% VERSION RUN SPEED CLEARANCE FILEIDX  to go back to all defaults.
 
-SCENARIO  = 'S18';        % S1 ... S18 (S17 = real walk, see FILEIDX)
-PROFILE   = 'typical';    % 'typical' or 'worst' noise
-VERSION   = 'full';       % 'full', 'basic', 'noE1', 'noE2', 'noE3', 'noE5'
-RUN       = 1;            % run number (same seed as phaseD_run uses)
-SPEED     = 4;            % playback speed (1 = real time)
-CLEARANCE = 2.5;          % fence-to-lane distance used by phaseD_run ([] = uwb_config fence)
-FILEIDX   = 1;            % for S17: 1 = walk 1, 2 = walk 2
+if ~exist('SCENARIO', 'var'),  SCENARIO  = 'S18';     end  % S1 ... S18 (S17 = real walk, see FILEIDX)
+if ~exist('PROFILE', 'var'),   PROFILE   = 'typical'; end  % 'typical' or 'worst' noise
+if ~exist('VERSION', 'var'),   VERSION   = 'full';    end  % 'full', 'basic', 'noE1', 'noE2', 'noE3', 'noE5'
+if ~exist('RUN', 'var'),       RUN       = 1;         end  % run number (same seed as phaseD_run uses)
+if ~exist('SPEED', 'var'),     SPEED     = 4;         end  % playback speed (1 = real time)
+if ~exist('CLEARANCE', 'var'), CLEARANCE = 2.5;       end  % fence-to-lane distance used by phaseD_run ([] = uwb_config fence)
+if ~exist('FILEIDX', 'var'),   FILEIDX   = 1;         end  % for S17: 1 = walk 1, 2 = walk 2
 
 here = fileparts(mfilename('fullpath')); if isempty(here), here = pwd; end
 root = fileparts(here); addpath(root); addpath(here);
 cfg = phaseD_site(uwb_config(), CLEARANCE);
 SC = phaseD_scenarios(cfg);
-s = find(cellfun(@(x) strcmp(x.id, SCENARIO), SC)); sc = SC{s};
+s = find(cellfun(@(x) strcmp(x.id, SCENARIO), SC));
+if isempty(s), error('Unknown SCENARIO ''%s'' - use S1 ... S18', SCENARIO); end
+sc = SC{s};
+fprintf('Viewing %s (%s noise, %s, run %d)\n', SCENARIO, PROFILE, VERSION, RUN);
 profiles = {'typical', 'worst'};
 if strcmp(sc.type, 'replay')
     [F, E, P] = phaseD_prepare(sc, '', 0, cfg, root, FILEIDX); sc.warm = 3;
@@ -55,6 +63,7 @@ for k = 1:numel(P.t)
     [S, out] = safety_step(S, P.t(k), est, cfgV);
     if mod(k, round(0.1 / dt)) == 0
         H = safety_draw(H, cfgV, S, out, trail);
+        if ~ishandle(hTrue), break; end                % figure closed while drawing
         set(hTrue, 'XData', P.xy(k, 1), 'YData', P.xy(k, 2));
         while toc(tWall) < P.t(k) / SPEED, pause(0.005); end
     end

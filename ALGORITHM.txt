@@ -1,0 +1,154 @@
+UWB AGV SAFETY SYSTEM - HOW THE ALGORITHM AND LOGIC WORK
+=========================================================
+RSE4501 Navigation Mini-project 3
+
+Purpose
+-------
+A person wears a UWB tag. Four anchors mark out a fenced danger area with two
+AGV lanes (Lane 1 left->right, Lane 2 right->left). Instead of stopping every
+AGV whenever anyone is inside the fence, the system uses the person's position,
+speed and heading to slow or stop ONLY the AGVs that could actually reach them.
+
+Pipeline (runs about 25 times per second)
+-----------------------------------------
+  Tag ranges -> 1. Decode -> 2. Position -> 3. Kalman filter -> 4. Risk per lane
+             -> 5. Level per AGV -> 6. AGV command + motion -> 7. Display / log
+
+
+1. DECODE  (nf2_parse.m, UwbSource.m)
+-------------------------------------
+- The tag sends Nooploop "Node_Frame2" packets over serial (921600 baud).
+- Each packet: header 0x55 0x04, length, then for each anchor its distance
+  (int24 / 1000 = metres) and signal strength (fp/rx RSSI).
+- Checksum = sum of all bytes (low 8 bits). Bad packets are dropped; the parser
+  re-synchronises on the next header.
+- Result: one set of 4 distances (one per anchor) + timestamp, per frame.
+- Live mode reads the COM port; replay mode reads a recorded file, so the same
+  code runs on recorded and live data.
+
+
+2. POSITION - TRILATERATION  (uwb_trilat.m)
+-------------------------------------------
+a) Height correction. The anchors (1.30 m) and tag (0.56 m) are at different
+   heights, so the measured distance d is a slant distance. Horizontal range:
+        r = sqrt(d^2 - (h_anchor - h_tag)^2)
+b) Linear least squares. Subtracting one circle equation from the others gives
+   a linear system M*p = b -> a first guess of the position.
+c) Gauss-Newton. Refines the position to best fit all ranges at once.
+d) Residual RMS = how badly the ranges disagree with the solved position.
+   A large residual means a bad fix (e.g. NLOS: a body or wall blocking one
+   anchor). Used by enhancement E3b.
+- At least 3 anchors are needed; with 2 or fewer no position is produced.
+
+
+3. KALMAN FILTER  (uwb_kf_init.m, uwb_kf_step.m, uwb_process.m)
+---------------------------------------------------------------
+- State: [x, y, vx, vy]  (position and velocity), constant-velocity model.
+- Predict: move the state forward by dt; uncertainty grows (process noise q).
+- Measurement noise per fix:
+        sigma = sqrt(sigma0^2 + (cRes * residualRMS)^2)       (E3b)
+  so a fix whose ranges disagree is trusted less.
+- Gate: a fix too far from the prediction (chi-square test, 13.8) is rejected,
+  e.g. a 3 m jump from an NLOS spike.
+- Restart: after a data gap > 1 s or 12 rejections in a row the filter
+  re-initialises at the latest fix.
+- Outputs: smoothed position, velocity, speed, heading, and
+        sigmaPos = position uncertainty (1-sigma, worst direction)      (E3a)
+  plus data age, used to detect lost signal (E4).
+
+
+4. RISK PER LANE  (safety_step.m)
+---------------------------------
+For each lane the system computes:
+  d    = distance from the person to the lane EDGE (negative = in the lane)
+  vT   = speed towards the lane (velocity component pointing at it)
+  TTL  = time to lane = d / vT, only if vT > 0.15 m/s, else infinite   (E1)
+  B    = safety buffer = min(0.40 + 2.0 * sigmaPos, 1.25) m             (E3)
+         -> a less certain position gives a wider buffer
+
+Zones (bands derived in Phase B from walking speed, reaction time and AGV
+braking: inside each zone a person who starts walking could reach the lane
+before an AGV at the faster level could stop):
+  STOP   if d < B + 0.70 m   or  TTL < 2.5 s
+  CRAWL  if d < B + 1.10 m
+  SLOW   if d < B + 1.90 m   or  TTL < 3.5 s
+  NORMAL otherwise
+The lane level = the most cautious condition that is on.
+
+Hysteresis and dwell (E5, risk_hyst.m):
+  Each condition turns ON immediately, but turns OFF only after it has been
+  clear for 1.0 s, and (for distance) only once the person is 0.45 m beyond
+  the zone edge. This stops the level flickering when position noise
+  (+-0.2 m) moves the estimate back and forth across a boundary.
+
+Special rules:
+  - Outside the fence -> every lane NORMAL (fence also has hysteresis).
+  - Entry rule: for the first 1.5 s after entering the fence, any lane within
+    2.0 m is STOP, because the speed estimate is not yet reliable after a turn.
+
+
+5. LEVEL PER AGV  (safety_step.m)
+---------------------------------
+E2 - only the AGV that is approaching the person reacts:
+  - Find the point on the lane where the person would cross.
+  - If the AGV's REAR has already passed that point by 0.7 m, the AGV is
+    driving away from the person: it stays NORMAL.
+  - Otherwise the AGV takes its lane's level.
+
+E4 - fail-safe:
+  If there is no data for 0.5 s, the filter is stale, or sigmaPos > 0.5 m,
+  every AGV goes to at least CRAWL; an AGV already at STOP stays at STOP.
+  At start-up the AGVs are held at this level until the filter has settled.
+
+
+6. AGV COMMAND AND MOTION  (simulated, safety_step.m)
+------------------------------------------------------
+Levels and speeds (max 1.0 m/s):
+  NORMAL 100%   SLOW 50%   CRAWL 20%   STOP 0%
+- Command latency 0.2 s (a queue delays each command).
+- Braking 0.5 m/s^2, acceleration 0.3 m/s^2.
+- AGVs on the same lane keep a 0.5 m gap (queueing, no collisions).
+- At the lane end an AGV returns out of sight and re-enters along a 3 m
+  feeder track before the lane start, where the rules already apply (so an
+  AGV never "appears" next to the person).
+(These AGV values are assumptions; the logic does not depend on them except
+ through the zone sizes, which are re-derived in Phase B if they change.)
+
+
+7. DISPLAY AND LOG  (safety_draw.m, safety_events.m)
+----------------------------------------------------
+- Map: anchors, fence, lanes, AGVs coloured by level, person estimate with
+  uncertainty circle and heading arrow, recent trail.
+- Panel: time, position, speed, buffer, fence state, per-lane distance / TTL /
+  level / reason, per-AGV level and speed.
+- Warning light (4 lamps) shows the most cautious AGV level
+  (green NORMAL, amber SLOW, orange CRAWL, red STOP).
+- Event log: events.csv (every level change with reason, position, TTL,
+  latency, stop margin) and visits.csv (each stay inside the fence: entry,
+  exit, duration, worst level, number of STOPs, closest moving AGV).
+
+
+ENHANCEMENTS SUMMARY
+--------------------
+  E1  Time-to-lane       warns earlier when the person walks towards a lane
+  E2  Approaching AGV    AGVs that have already passed keep moving
+  E3a Buffer from KF     larger safety margin when the position is uncertain
+  E3b Residual weight    bad (NLOS) fixes are trusted less by the filter
+  E4  Fail-safe          lost / unreliable signal -> CRAWL, STOP is kept
+  E5  Hysteresis/dwell   no flickering between levels at zone boundaries
+
+
+HOW IT WAS TESTED (Phase D)
+---------------------------
+- 18 scripted scenarios (walking, running, standing, crossing, signal loss,
+  NLOS, a 4-minute work shift) with real range errors from the recordings.
+- Each run is compared with the basic rule "stop every AGV whenever anyone is
+  inside the fence", using the same scenario, noise and seed.
+- Result (10 runs, 340 pairs): same safety (14 vs 14 near misses, 0 contacts,
+  all in running / stepping in at the lane start), +24.1 percentage points AGV
+  productivity (95% CI +22.3 to +26.0).
+- Switching off one enhancement at a time shows each one's contribution:
+  E1 +0.26 s earlier warning, E2 +3.9 points productivity, E3 halves flicker,
+  E5 prevents 2 near misses and 13x flicker.
+- Fence clearance: walking is safe from 1.0 m fence-to-lane distance; running
+  needs 3.0 m (same for both systems - a layout requirement).
