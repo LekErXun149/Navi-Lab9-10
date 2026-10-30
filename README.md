@@ -38,7 +38,7 @@ Also runs in GNU Octave 8 for everything except live serial.
 | `safety_events_write.m` | Writes the event log to `<name>_events.csv` and `<name>_visits.csv` (open in Excel) |
 | `phaseC_run.m` | **Main program:** live tag (or replay) -> safety logic -> simulated AGVs, with display and log |
 | `phaseC_offline.m` | Runs the safety system on the recordings; time per level, STOP events, closest distance, timeline figures, event CSVs in `logs/` |
-| `phaseC_selftest.m` | 19 checks of the safety logic and event log with made-up positions |
+| `phaseC_selftest.m` | 20 checks of the safety logic and event log with made-up positions |
 | `Scenarios/phaseD_run.m` | **Phase D main script:** every scenario x noise profile x run x version, report + figures |
 | `Scenarios/phaseD_scenarios.m` | The 18 scenarios (paths relative to Lane 1, pass criteria) |
 | `Scenarios/phaseD_view.m` | Watch one scenario run on the live display, with the true position |
@@ -141,7 +141,8 @@ tape; stand still 30 s (speed ~0, data OK); walk a short line (speed ~0.5-1 m/s)
 `TUNING_RESULTS.md` updated.
 
 **B-2 Values.** Open `TUNING_RESULTS.md`. **Pass:** vApproach 0.15, tStop 2.5, tSlow 3.5,
-buffer 0.4 m + 2 sigma, cap 1.25 m, slowBand 1.3 m, entryReach 2.0 m, gap 0.45 m, dwell 1.0 s.
+buffer 0.4 m + 2 sigma, cap 1.25 m, slowBand 1.9 m, crawlBand 1.1 m, stopBand 0.7 m,
+entryReach 2.0 m, gap 0.45 m, dwell 1.0 s.
 
 **B-3 Re-tune with chosen files, including a raw `.bin`** (the route used after a new anchor setup).
 Find a `.bin` from test 3 with `dir logs/*.bin` (repeat test 3 if there is none), then:
@@ -167,9 +168,10 @@ phaseB_tuning
 ```matlab
 phaseC_selftest
 ```
-**Pass:** `19 PASS, 0 FAIL`. Made-up positions check: outside the fence -> NORMAL; person in
+**Pass:** `20 PASS, 0 FAIL`. Made-up positions check: outside the fence -> NORMAL; person in
 Lane 1 -> only the AGV heading to them STOPs, the one that has passed stays NORMAL, Lane 2
-only SLOW (E2); braking time; command latency; a fast walker triggers STOP further from the
+at its zone level (E2); standing 2.7 / 2.5 / 1.7 / 1.3 m from a lane gives NORMAL / SLOW /
+CRAWL / STOP (standing-start zones); braking time; command latency; a fast walker triggers STOP further from the
 lane than a slow one (E1); data lost -> CRAWL, a STOP is kept, high uncertainty counts as
 lost (E4); larger uncertainty -> larger buffer (E3a); no flicker on a boundary (E5);
 outside the fence next to a lane end -> NORMAL; an AGV catching up with a slower one
@@ -187,9 +189,9 @@ phaseC_offline
 
 | Recording | Check |
 |---|---|
-| `walk1_1704` | fence INSIDE ~64%; L1-A STOP ~35%; 3 fence visits; STOP latency 0.20 s; closest AGV faster than CRAWL >= ~1.5 m |
-| `walk2` | fence INSIDE ~36%; every AGV NORMAL 68-83%; 1 visit; closest >= ~1.2 m |
-| `static_1533` | Lane 1 AGVs SLOW ~92%; closest >= ~1.5 m |
+| `walk1_1704` | fence INSIDE ~64%; L1-A STOP ~47%; 3 fence visits; STOP latency 0.20 s; closest AGV faster than CRAWL >= ~2.9 m |
+| `walk2` | fence INSIDE ~36%; every AGV NORMAL 65-77%; 1 visit; closest >= ~1.8 m |
+| `static_1533` | person stands ~1.4 m from both lanes: STOP zone, AGVs STOP ~87-99% |
 
 **C-3 Replay with display.** In `phaseC_run.m` set `MODE = "replay";`, then `phaseC_run`.
 
@@ -237,9 +239,11 @@ Run in MATLAB from the `Scenarios` folder (`cd Scenarios`). Results go to `Scena
 clear OPT; OPT.quick = true; phaseD_run
 ```
 **Pass:** about 5-10 minutes, no errors, `results/DTEST_RESULTS.md` and `results/phaseD_comparison.png`
-written. Close to: productivity this system ~68% vs basic ~35% (paired difference ~+30 points);
-typical noise: same near misses as basic (only S6, running); all of S1, S2, S4, S5, S7, S9-S11,
-S13-S18 passed.
+written. Close to:
+productivity this system ~60% vs basic ~38% (paired difference ~+22 points); near misses
+and contacts equal to basic in both noise profiles (only S6, running); all scenarios except
+S3, S6, S12 passed in every run (S3, S12 fail only with worst-case noise: extra level
+changes, no safety effect).
 
 **D-2 Full run** (the numbers for the report: 10 runs, all six versions).
 ```matlab
@@ -271,10 +275,10 @@ logic, AGVs, event log). Paths are defined relative to Lane 1, so they follow `c
 
 | Group | Scenarios |
 |---|---|
-| Normal work | S1 walk outside the fence, S2 walk parallel inside, S3 stand inside away from lanes |
+| Normal work | S1 walk outside the fence, S2 walk parallel inside, S3 stand inside in the SLOW zone |
 | Approaching (E1) | S4 slow 0.3 m/s, S5 walk 0.8 m/s into a lane, S6 run 1.5 m/s, S7 cross both lanes, S8 hesitant |
 | Direction (E2) | S9 cross just after an AGV passed, S10 walk inside a lane, S11 step in at a lane start |
-| Boundaries (E5) | S12 stand on the SLOW boundary 60 s, S13 stand in a lane 20 s then leave |
+| Boundaries (E5) | S12 stand on the CRAWL boundary 60 s, S13 stand in a lane 20 s then leave |
 | Bad data (E3, E4) | S14 signal lost near a lane, S15 signal lost outside, S16 NLOS burst +1 m |
 | Real data | S17 replay of walks 1 and 2 |
 | Productivity | S18 work shift (~4 min of tasks near the lanes, crossings, breaks) |
@@ -318,7 +322,7 @@ and writes `TUNING_RESULTS.md` (values + evidence, for the report).
 |---|---|---|
 | B1, B2 | Speed noise when still, walking speeds | (evidence) |
 | B5 | Error vs tape at a known point | `bufBase`, `bufK`, `bufMax` |
-| B3, B4 | Filter reaction time with real noise, AGV braking, false triggers when standing just outside the SLOW zone | `vApproach`, `tStop`, `tSlow`, `slowBand`, `entryReach` |
+| B3, B4 | Filter reaction time with real noise, AGV braking, false triggers when standing just outside the SLOW zone, standing-start zones | `vApproach`, `tStop`, `tSlow`, `slowBand`, `crawlBand`, `stopBand`, `entryReach` |
 | B6 | Flicker when standing on a boundary | `hystGap`, `dwell` |
 | B7 | Data gaps while walking | checks `cfg.health.staleTime` |
 
@@ -354,10 +358,11 @@ Levels: 1 NORMAL (100%), 2 SLOW (50%), 3 CRAWL (20%), 4 STOP, from `cfg.agv.leve
 |---|---|
 | Fence | Person outside `cfg.site.fence` -> every AGV NORMAL |
 | Buffer (E3a) | `B = min(bufBase + bufK * sigmaPos, bufMax)`; residual (E3b) enters through the filter's measurement noise |
-| STOP | distance to lane edge `< B`, or time-to-lane `< tStop`, or (entry rule) within `entryReach` during the first `entryHold` s after entering the fence |
+| STOP | distance to lane edge `< B + stopBand`, or time-to-lane `< tStop`, or (entry rule) within `entryReach` during the first `entryHold` s after entering the fence |
+| CRAWL | distance `< B + crawlBand` |
 | SLOW | distance `< B + slowBand`, or time-to-lane `< tSlow` |
 | Time-to-lane (E1) | distance / speed towards the lane, only if that speed `> vApproach` |
-| SLOW zone size | `B + slowBand` = walking reach in `tStop` (0.8 m/s x tStop): someone standing there could reach the lane before an AGV at full speed stops |
+| Zone sizes (standing start) | A person standing at distance d can reach the lane in d / 0.8 s. An approaching AGV at speed v needs reaction (detect + latency + margin, ~1.25 s) + v / decel. Inside that walking reach the speed is unsafe, so the AGV must already be one level slower: NORMAL unsafe within ~2.6 m (-> SLOW), SLOW within ~1.8 m (-> CRAWL), CRAWL within ~1.3 m (-> STOP). Found in Phase D (S8, S18), derived in Phase B |
 | Entry rule | The speed estimate lags ~1 s after a turn, so for `entryHold` s after entering the fence every lane within `entryReach` STOPs (found in Phase D) |
 | Direction (E2) | Only an AGV whose **rear** has not yet passed the person's crossing point by `passMargin` takes the lane's level |
 | Hysteresis (E5) | Each condition ON at once, OFF only when clear by `hystGap` for `dwell` seconds |

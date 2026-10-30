@@ -120,6 +120,7 @@ end
 w = t > 4 & t < 6; posLag = median(mean(truthY(w) - PY(w, :)));
 tLagPos = posLag / vWalk;
 vN = cfg.agv.vMax * cfg.agv.levels(1); vS = cfg.agv.vMax * cfg.agv.levels(2);
+vC = cfg.agv.vMax * cfg.agv.levels(3);
 margin = 0.5; dwell = 1.0;
 sTyp = median(D(1).E.sigmaPos(D(1).ok));                % typical position uncertainty
 cands = 0.15:0.05:0.60; nc = numel(cands);
@@ -135,10 +136,22 @@ for c = 1:nc
     T(c).tStopRaw = T(c).tFilter + tLagPos + cfg.agv.latency + vS / cfg.agv.decel + margin;
     T(c).tSlowRaw = T(c).tStopRaw + cfg.agv.latency + (vN - vS) / cfg.agv.decel;
     T(c).tStop = ceilTo(T(c).tStopRaw, 0.5); T(c).tSlow = ceilTo(T(c).tSlowRaw, 0.5);
-    % SLOW zone edge = walking reach in tStop (someone standing there can reach the
-    % lane before an AGV at full speed stops - Phase D, S8). Each candidate gets its
-    % own zone and is tested standing just outside it.
-    T(c).slowBand = ceilTo(vWalk * T(c).tStop - (bufBase + bufK * sTyp), 0.1);
+    % Standing-start zones (Phase D, S8/S18): a person standing at distance d can
+    % reach the lane in d / vWalk. An AGV at level speed v needs
+    %   tReact + v / decel,  tReact = detect + position lag + latency + margin.
+    % So within reach(v) = vWalk x (tReact + v / decel) that speed is unsafe and the
+    % approaching AGV must already be one level slower. Zone edges are measured from
+    % the lane edge; the bands are beyond the typical buffer (B = bufBase + bufK sigma).
+    tReact = T(c).tFilter + tLagPos + cfg.agv.latency + margin;
+    reachN = vWalk * (tReact + vN / cfg.agv.decel);         % NORMAL unsafe inside -> SLOW
+    reachS = vWalk * (tReact + vS / cfg.agv.decel);         % SLOW unsafe inside   -> CRAWL
+    reachC = vWalk * (tReact + vC / cfg.agv.decel);         % CRAWL unsafe inside  -> STOP
+    Btyp = bufBase + bufK * sTyp;
+    T(c).slowBand  = ceilTo(reachN - Btyp, 0.1);
+    T(c).crawlBand = ceilTo(reachS - Btyp, 0.1);
+    T(c).stopBand  = max(0, ceilTo(reachC - Btyp, 0.1));
+    T(c).reach = [reachN reachS reachC];
+    % each candidate is tested standing just outside its own SLOW zone
     D0 = bufBase + T(c).slowBand; T(c).D0 = D0;
     worst = 0;                                          % false SLOW triggers / min
     for i = find(isStatic)
@@ -162,10 +175,11 @@ for c = 1:nc
     T(c).walkDetected = mean(wv > vA);
 end
 fprintf('    standing still just outside the SLOW zone; walk detection = %% of walking frames faster than vApproach\n');
-fprintf('    vApproach | detect 95%% | tStop | tSlow | slowBand | stand at | false SLOW/min | walking detected\n');
+fprintf('    vApproach | detect 95%% | tStop | tSlow | slow/crawl/stop band | stand at | false SLOW/min | walking detected\n');
 for c = 1:nc
-    fprintf('      %.2f    |   %.2f s   | %.1f s | %.1f s |  %.1f m   |  %.1f m   |     %5.2f      |     %3.0f%%\n', ...
-        cands(c), T(c).tFilter, T(c).tStop, T(c).tSlow, T(c).slowBand, T(c).D0, T(c).falsePerMin, 100 * T(c).walkDetected);
+    fprintf('      %.2f    |   %.2f s   | %.1f s | %.1f s |  %.1f / %.1f / %.1f m  |  %.1f m   |     %5.2f      |     %3.0f%%\n', ...
+        cands(c), T(c).tFilter, T(c).tStop, T(c).tSlow, T(c).slowBand, T(c).crawlBand, T(c).stopBand, ...
+        T(c).D0, T(c).falsePerMin, 100 * T(c).walkDetected);
 end
 cPick = find([T.falsePerMin] <= maxFalsePerMin, 1); if isempty(cPick), cPick = nc; end
 vApproach = cands(cPick); tFilter = T(cPick).tFilter;
@@ -176,10 +190,15 @@ fprintf('    tStop = detect %.2f + position lag %.2f + latency %.2f + brake from
 fprintf('    tSlow = tStop %.2f + latency %.2f + brake NORMAL->SLOW %.2f = %.2f -> %.1f s\n', ...
     tStopRaw, cfg.agv.latency, (vN - vS) / cfg.agv.decel, tSlowRaw, tSlow);
 fprintf('    at a walk of 0.8 m/s: STOP from %.1f m, SLOW from %.1f m before the lane edge\n', 0.8 * tStop, 0.8 * tSlow);
-reach = vWalk * tStop; slowBand = T(cPick).slowBand; entryReach = reach;
-fprintf('    walking reach in tStop = %.1f m -> SLOW zone edge; slowBand = %.1f - (%.1f + %d x %.2f) = %.1f m\n', ...
-    reach, reach, bufBase, bufK, sTyp, slowBand);
-fprintf('    entry rule reach = %.1f m\n', entryReach);
+reach = vWalk * tStop; entryReach = reach;
+slowBand = T(cPick).slowBand; crawlBand = T(cPick).crawlBand; stopBand = T(cPick).stopBand;
+rr = T(cPick).reach; Btyp = bufBase + bufK * sTyp;
+fprintf('    standing-start zones (0.8 m/s x reaction %.2f s + braking), typical buffer %.2f m:\n', ...
+    T(cPick).tFilter + tLagPos + cfg.agv.latency + margin, Btyp);
+fprintf('      NORMAL unsafe within %.2f m -> slowBand  = %.1f m\n', rr(1), slowBand);
+fprintf('      SLOW   unsafe within %.2f m -> crawlBand = %.1f m\n', rr(2), crawlBand);
+fprintf('      CRAWL  unsafe within %.2f m -> stopBand  = %.1f m\n', rr(3), stopBand);
+fprintf('    entry rule reach = walking reach in tStop = %.1f m\n', entryReach);
 
 %% B6 - hysteresis: flicker when standing still on a boundary ------------
 fprintf('\nB6  Flicker when standing on a boundary (warning releases per minute, worst case)\n');
@@ -234,7 +253,8 @@ fprintf('    -> staleTime %.1f s is kept (no false fail-safe while walking)\n', 
 
 %% Summary + results file -------------------------------------------------
 rec = struct('vApproach', vApproach, 'tStop', tStop, 'tSlow', tSlow, 'bufBase', bufBase, ...
-             'bufK', bufK, 'bufMax', bufMax, 'slowBand', slowBand, 'entryReach', entryReach, ...
+             'bufK', bufK, 'bufMax', bufMax, 'slowBand', slowBand, 'crawlBand', crawlBand, ...
+             'stopBand', stopBand, 'entryReach', entryReach, ...
              'hystGap', hystGap, 'dwell', dwell);
 fn = fieldnames(rec);
 fprintf('\nRecommended vs current uwb_config.m:\n');
@@ -255,7 +275,8 @@ fprintf(fid, '| `tStop` | %.1f s | detect %.2f + position lag %.2f + latency %.2
 fprintf(fid, '| `tSlow` | %.1f s | tStop + latency + brake NORMAL to SLOW %.2f s (B4) |\n', tSlow, (vN - vS) / cfg.agv.decel);
 fprintf(fid, '| `bufBase`, `bufK` | %.1f m + %d x sigma | covers the true position %.0f%% of the time at the worst-case point (B5) |\n', bufBase, bufK, 100 * cov(aPick, ks == bufK));
 fprintf(fid, '| `bufMax` | %.2f m | bufBase + %d x 99th percentile of sigma (B5) |\n', bufMax, bufK);
-fprintf(fid, '| `slowBand` | %.1f m | buffer + slowBand = walking reach in tStop (0.8 m/s x %.1f s = %.1f m): a person standing there can reach the lane before an AGV at full speed stops, so approaching AGVs are pre-slowed (B4, Phase D S8) |\n', slowBand, tStop, reach);
+fprintf(fid, '| `slowBand`, `crawlBand`, `stopBand` | %.1f, %.1f, %.1f m | standing-start zones: a person standing within %.2f / %.2f / %.2f m of the lane can reach it before an approaching AGV at NORMAL / SLOW / CRAWL can stop (0.8 m/s x (detect + latency + margin + braking)), so the AGV must already be one level slower; bands are beyond the typical buffer %.2f m (B4, Phase D S8, S18) |\n', ...
+    slowBand, crawlBand, stopBand, rr(1), rr(2), rr(3), Btyp);
 fprintf(fid, '| `entryReach` | %.1f m | same walking reach: lanes this close STOP for `entryHold` s after the person enters the fence (Phase D S18) |\n', entryReach);
 fprintf(fid, '| `hystGap`, `dwell` | %.2f m, %.1f s | %.1f flips/min standing on a boundary vs %.0f flips/min for NAssistant without hysteresis (B6) |\n', ...
     hystGap, dwell, flipsKF(gaps == hystGap, dwells == dwell), flipsNA(1, 1));

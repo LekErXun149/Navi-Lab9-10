@@ -9,9 +9,12 @@ function [S, out] = safety_step(S, ts, est, cfg)
 %   Per lane (person's distance d to the lane edge, buffer B):
 %     B   = min(bufBase + bufK * sigmaPos, bufMax)                      (E3a; E3b via KF)
 %     TTL = d / (speed towards the lane), only if that speed > vApproach  (E1)
-%     STOP if d < B           or TTL < tStop
-%     SLOW if d < B+slowBand  or TTL < tSlow
-%     Each of the four conditions switches ON at once and OFF only when it is
+%     STOP  if d < B+stopBand   or TTL < tStop
+%     CRAWL if d < B+crawlBand
+%     SLOW  if d < B+slowBand   or TTL < tSlow
+%     (bands = standing-start zones from Phase B: inside, a person who starts
+%      walking could reach the lane before a faster approaching AGV could stop)
+%     Each condition switches ON at once and OFF only when it is
 %     clear (distance: hystGap further out) for 'dwell' seconds          (E5)
 %   Person outside the fence -> all lanes NORMAL.
 %   Entry rule: for entryHold s after the person enters the fence, every lane
@@ -65,14 +68,15 @@ if ~stale
         else, ttl = Inf; end
         % distance and time-to-lane warnings each have their own hysteresis (E5)
         cE   = entry && d < R.entryReach;                  % just entered, lane within walking reach
-        cond = [d < B,               ttl < R.tStop, d < B + R.slowBand,                ttl < R.tSlow,  cE];
-        rel  = [d > B + gapH,        ttl >= R.tStop, d > B + R.slowBand + gapH,        ttl >= R.tSlow, ~cE];
-        on = false(1, 5);
-        for f = 1:5
+        zS = B + R.stopBand; zC = B + R.crawlBand; zW = B + R.slowBand;   % zone edges
+        cond = [d < zS,        ttl < R.tStop,  d < zW,        ttl < R.tSlow,  cE,  d < zC];
+        rel  = [d > zS + gapH, ttl >= R.tStop, d > zW + gapH, ttl >= R.tSlow, ~cE, d > zC + gapH];
+        on = false(1, 6);
+        for f = 1:6
             [on(f), S.lane(l).mem{f}] = risk_hyst(cond(f), ts, rel(f), dwellH, S.lane(l).mem{f});
         end
-        lvlOf = [4 4 2 2 4];
-        names = {'in lane / buffer', 'approaching fast', 'near lane', 'approaching', 'just entered'};
+        lvlOf = [4 4 2 2 4 3];
+        names = {'in lane / buffer', 'approaching fast', 'near lane', 'approaching', 'just entered', 'close to lane'};
         lvl = 1; why = '';
         if any(on)
             lvl = max(lvlOf(on));

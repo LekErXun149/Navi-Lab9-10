@@ -12,7 +12,7 @@ for l = 1:nL
     S.lane(l).L = norm(b - a);
     S.lane(l).u = (b - a) / S.lane(l).L;                 % driving direction
     S.lane(l).nrm = [-S.lane(l).u(2) S.lane(l).u(1)];    % sideways unit vector
-    S.lane(l).mem = {[], [], [], [], []};                % hysteresis memories (E5): stop-dist, stop-TTL, slow-dist, slow-TTL, entry
+    S.lane(l).mem = cell(1, 6);                          % hysteresis memories (E5): stop-dist, stop-TTL, slow-dist, slow-TTL, entry, crawl-dist
 end
 
 k = 0;

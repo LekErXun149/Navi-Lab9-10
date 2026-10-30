@@ -78,7 +78,9 @@ cfg.risk.tSlow     = 3.5;    % s: time-to-lane below this -> SLOW
 cfg.risk.bufBase   = 0.40;   % m: fixed part of the safety buffer (covers bias)
 cfg.risk.bufK      = 2.0;    % buffer = bufBase + bufK * sigmaPos   (E3a)
 cfg.risk.bufMax    = 1.25;   % m: cap on the buffer
-cfg.risk.slowBand  = 1.30;   % m: SLOW zone beyond the buffer; B + slowBand = 0.8 m/s x tStop (Phase B, B4)
+cfg.risk.slowBand  = 1.90;   % m: SLOW  if distance < B + slowBand  (standing-start zones, Phase B B4:
+cfg.risk.crawlBand = 1.10;   % m: CRAWL if distance < B + crawlBand  a person standing inside can reach the
+cfg.risk.stopBand  = 0.70;   % m: STOP  if distance < B + stopBand   lane before a faster AGV could stop)
 cfg.risk.hystGap   = 0.45;   % m: release only when this much further out (E5)
 cfg.risk.dwell     = 1.0;    % s: release condition must hold this long (E5)
 cfg.risk.entryHold  = 1.5;   % s: after entering the fence, lanes within entryReach STOP (Phase D finding:

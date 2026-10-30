@@ -41,9 +41,10 @@ s = mk('S2', 'Walk inside the fence, parallel to Lane 1', 1, P, warm, ...
     @(m) ~m.stopInWin, 'no STOP while walking parallel (from 3 s after entering)');
 s.calmWin = [P.mark.in + 3, P.mark.endpar]; SC{end+1} = s;
 
-P = phaseD_path(pt(0, out1), {'wait', warm, [], ''; 'to', pt(0, bF1 - 0.6), W, 'in'; 'wait', 30, [], 'stand'; ...
+bMid = min(e + Bt + (cfg.risk.crawlBand + cfg.risk.slowBand) / 2, bF1 - 0.3);   % middle of the SLOW zone
+P = phaseD_path(pt(0, out1), {'wait', warm, [], ''; 'to', pt(0, bMid), W, 'in'; 'wait', 30, [], 'stand'; ...
     'to', pt(0, out1), W, ''});
-s = mk('S3', 'Stand still inside the fence, away from the lanes', 1, P, warm, ...
+s = mk('S3', 'Stand still inside the fence, in the SLOW zone', 1, P, warm, ...
     @(m) ~m.stopInWin && m.flicker <= 1, 'no STOP while standing (from 3 s), <= 1 lane level change per minute');
 s.win = [P.mark.stand + 3, P.mark.stand + 30]; s.calmWin = s.win; SC{end+1} = s;
 
@@ -94,9 +95,9 @@ s.agv = {'L1-A', -cfg.agv.feedLen};
 s.feederAgv = 'L1-A'; s.feederWin = [P.mark.inlane P.mark.stand + 5]; SC{end+1} = s;
 
 % ---------------- Group 4: boundaries and stopping (E5) --------------------
-bB = e + Bt + cfg.risk.slowBand;
+bB = e + Bt + cfg.risk.crawlBand;                     % CRAWL zone edge (inside the fence)
 P = phaseD_path(pt(0, out1), {'wait', warm, [], ''; 'to', pt(0, bB), W, ''; 'wait', 60, [], 'stand'; 'to', pt(0, out1), W, ''});
-s = mk('S12', 'Stand exactly on the SLOW boundary for 60 s', 4, P, warm, ...
+s = mk('S12', 'Stand exactly on the CRAWL boundary for 60 s', 4, P, warm, ...
     @(m) m.flicker <= 1, '<= 1 lane level change per minute (= 0.5 releases, as in Phase B)');
 s.win = [P.mark.stand + 3 P.mark.stand + 60]; SC{end+1} = s;
 

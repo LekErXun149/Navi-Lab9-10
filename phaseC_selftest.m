@@ -24,14 +24,30 @@ S.agv(idx(S, 'L1-A')).v = cfg.agv.vMax;   % moving at full speed
 for ts = 0:dt:3.0, [S, o] = safety_step(S, ts, mk([6 3.4], [0 0]), cfg); end   % after the entry rule
 T(end+1, :) = {'in Lane 1: approaching AGV L1-A STOPs', o.applied(idx(S, 'L1-A')) == STOP};
 T(end+1, :) = {'in Lane 1: AGV L1-B that has passed stays NORMAL', o.applied(idx(S, 'L1-B')) == NORMAL};
-T(end+1, :) = {'in Lane 1: Lane 2 (1.4 m away) only SLOW for approaching AGV', ...
-    o.applied(idx(S, 'L2-A')) == SLOW && o.applied(idx(S, 'L2-B')) == NORMAL};
+B0 = cfg.risk.bufBase + cfg.risk.bufK * sig; d2 = 1.4 - cfg.site.laneWidth;    % Lane 2 edge distance
+lv2 = 1 + (d2 < B0 + cfg.risk.slowBand) + (d2 < B0 + cfg.risk.crawlBand) + (d2 < B0 + cfg.risk.stopBand);
+T(end+1, :) = {sprintf('in Lane 1: Lane 2 (%.1f m away) %s for approaching AGV only', d2, cfg.agv.names{lv2}), ...
+    o.applied(idx(S, 'L2-A')) == lv2 && o.applied(idx(S, 'L2-B')) == NORMAL};
 
 %% 3. Braking: L1-A stands still within latency + vMax/decel
 tLimit = cfg.agv.latency + cfg.agv.vMax / cfg.agv.decel + 0.1;
 S.agv(idx(S, 'L1-A')).v = cfg.agv.vMax; t1 = ts;
 for ts = t1 + dt:dt:t1 + tLimit, [S, o] = safety_step(S, ts, mk([6 3.4], [0 0]), cfg); end
 T(end+1, :) = {sprintf('braking: L1-A at 0 m/s within %.1f s', tLimit), o.v(idx(S, 'L1-A')) == 0};
+
+%% 3b. Standing-start zones: a person standing closer to a lane -> slower AGVs
+% (larger fence so every test point is inside it)
+cfgZ = cfg; cfgZ.site.fence = [0 -2; 0 9; 12 9; 12 -2];
+B0 = cfg.risk.bufBase + cfg.risk.bufK * sig;
+dz = [B0 + cfg.risk.slowBand + 0.1, B0 + cfg.risk.slowBand - 0.1, B0 + cfg.risk.crawlBand - 0.1, B0 + cfg.risk.stopBand - 0.1];
+lz = zeros(1, 4);
+for z = 1:4
+    S = safety_init(cfgZ);
+    for ts = 0:dt:4, [S, o] = safety_step(S, ts, mk([6 3.7 + dz(z)], [0 0]), cfgZ); end  % after the entry rule
+    lz(z) = o.lane(1).level;
+end
+T(end+1, :) = {sprintf('zones: standing %.1f / %.1f / %.1f / %.1f m -> %s / %s / %s / %s', dz, cfg.agv.names{lz}), ...
+    isequal(lz, [NORMAL SLOW CRAWL STOP])};
 
 %% 4. Command latency: level changes reach the AGV after cfg.agv.latency
 S = safety_init(cfg); S.agv(idx(S, 'L1-A')).s = 1.0;
@@ -134,7 +150,10 @@ for ts = 0:dt:6
     [S, o] = safety_step(S, ts, mk([6 3.7 + 1.5], [0 0]), cfg);   % 1.5 m from Lane 1, standing
     lv(end+1) = o.lane(1).level; %#ok<AGROW>
 end
-T(end+1, :) = {'entry rule: STOP for the first 1.5 s, then only SLOW', lv(5) == STOP && lv(end) == SLOW};
+B0 = cfg.risk.bufBase + cfg.risk.bufK * sig; d1 = 1.5;
+lvE = 1 + (d1 < B0 + cfg.risk.slowBand) + (d1 < B0 + cfg.risk.crawlBand) + (d1 < B0 + cfg.risk.stopBand);
+T(end+1, :) = {sprintf('entry rule: STOP for the first 1.5 s, then %s (zone level)', cfg.agv.names{lvE}), ...
+    lv(5) == STOP && lv(end) == lvE};
 
 %% 14. Event log: walk in from outside the fence, stand in Lane 1, walk out
 S = safety_init(cfg); EV = [];
