@@ -18,6 +18,7 @@ T(end+1, :) = {'outside fence: all AGVs NORMAL', all(o.applied == NORMAL)};
 S = safety_init(cfg);
 S.agv(idx(S, 'L1-A')).s = 1.0;      % x = 3.5, person (x = 6) ahead of it
 S.agv(idx(S, 'L1-B')).s = 6.0;      % x = 8.5, already 2.5 m past the person
+S.agv(idx(S, 'L1-A')).v = cfg.agv.vMax;   % moving at full speed
 for ts = 0:dt:1.0, [S, o] = safety_step(S, ts, mk([6 3.4], [0 0]), cfg); end
 T(end+1, :) = {'in Lane 1: approaching AGV L1-A STOPs', o.applied(idx(S, 'L1-A')) == STOP};
 T(end+1, :) = {'in Lane 1: AGV L1-B that has passed stays NORMAL', o.applied(idx(S, 'L1-B')) == NORMAL};
@@ -109,7 +110,7 @@ T(end+1, :) = {sprintf('queueing: gap kept >= %.1f m (closest %.2f m)', cfg.agv.
 % speed, returns via the feeder track and must stop before the lane start.
 S = safety_init(cfg); iA = idx(S, 'L1-A'); iB = idx(S, 'L1-B');
 pP = cfg.site.lanes(1).p0 + [0.3 0];
-S.agv(iA).s = S.lane(1).L - 0.2;    % about to loop
+S.agv(iA).s = S.lane(1).L - 0.2; S.agv(iA).v = cfg.agv.vMax;    % about to loop, full speed
 S.agv(iB).s = 3.0;                  % already past the person
 dMin = Inf;
 for ts = 0:dt:12
@@ -121,6 +122,39 @@ for ts = 0:dt:12
 end
 T(end+1, :) = {sprintf('re-entering AGV stops before the person (closest moving %.1f m)', dMin), ...
     dMin > cfg.agv.length / 2 + 0.3 && S.agv(iA).v == 0 && S.agv(iA).s < 0};
+
+%% 14. Event log: walk in from outside the fence, stand in Lane 1, walk out
+S = safety_init(cfg); EV = [];
+iA = idx(S, 'L1-A'); S.agv(iA).s = -2.5; S.agv(iA).v = cfg.agv.vMax;   % on the feeder, full speed
+p = [6 7.0]; ts = 0;
+for ts = 0:dt:14
+    if ts < 4.3, v = [0 -0.8]; elseif ts < 8, v = [0 0]; else, v = [0 0.8]; end
+    p = p + v * dt;
+    [S, o] = safety_step(S, ts, mk(p, v), cfg);
+    EV = safety_events(EV, S, o, cfg);
+end
+ev = EV.ev;
+isE = @(name) find(strcmp(ev(:, 2), name));
+stopA = find(strcmp(ev(:, 2), 'LEVEL_CHANGE') & strcmp(ev(:, 3), 'L1-A') & strcmp(ev(:, 5), 'STOP'), 1);
+iIn = isE('FENCE_ENTER'); iOut = isE('FENCE_EXIT');        % (no chained indexing: MATLAB)
+ok = ~isempty(iIn) && ~isempty(iOut) && ~isempty(stopA) && iIn(1) < stopA && stopA < iOut(1);
+T(end+1, :) = {'event log: FENCE_ENTER -> STOP for L1-A -> FENCE_EXIT', ok};
+ok = ~isempty(stopA) && abs(ev{stopA, 12} - cfg.agv.latency) < dt + 1e-9 && ...
+     abs(ev{stopA, 13} - cfg.agv.vMax / cfg.agv.decel) < 0.2 && ev{stopA, 14} > 0;
+if ~isempty(stopA)
+    msg = sprintf('event log: STOP latency %.2f s, braking %.2f s, margin %.1f m', ev{stopA, 12}, ev{stopA, 13}, ev{stopA, 14});
+else, msg = 'event log: STOP reaction measured'; end
+T(end+1, :) = {msg, ok};
+
+%% 15. CSV files: written and readable
+base = fullfile(tempdir, 'phaseC_selftest');
+f = safety_events_write(EV, base, cfg);
+L1 = numel(strsplit(strtrim(fileread(f{1})), sprintf('\n')));
+L2 = strsplit(strtrim(fileread(f{2})), sprintf('\n'));
+vis = strsplit(L2{end}, ',');
+ok = L1 == size(EV.ev, 1) + 1 && numel(L2) == 2 && strcmp(vis{5}, 'STOP') && str2double(vis{8}) > 0;
+T(end+1, :) = {sprintf('CSV: %d events, 1 visit (worst STOP, warned %.1f s before lane)', L1 - 1, str2double(vis{8})), ok};
+delete(f{1}); delete(f{2});
 
 for k = 1:size(T, 1)
     if T{k, 2}, res = 'PASS'; else, res = '*** FAIL ***'; end

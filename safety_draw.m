@@ -4,7 +4,8 @@ function H = safety_draw(H, cfg, S, out, trail)
 %   H = safety_draw(H, cfg, S, out, trail)      update; trail = Nx2 recent positions
 %   Shows anchors, fence, lanes coloured by lane level, AGVs coloured by the
 %   level they are acting on (faded, dashed = on the feeder track before the
-%   lane start), the person with buffer circle and velocity arrow, and a status panel.
+%   lane start), the person with buffer circle and velocity arrow, a status panel,
+%   and a warning light showing the highest level any AGV is acting on.
 
 col = [0.20 0.70 0.30; 1.00 0.75 0.00; 1.00 0.45 0.00; 0.85 0.10 0.10];   % NORMAL SLOW CRAWL STOP
 if isempty(H)
@@ -42,7 +43,18 @@ if isempty(H)
     end
     axis(ax); xlabel('x (m)'); ylabel('y (m)');
     title('Person (blue, dotted = safety buffer), lanes and AGVs coloured by level');
-    H.axTxt = axes('Position', [0.70 0.08 0.29 0.86], 'Visible', 'off');
+    % warning light (replaces the planned Leonardo LEDs): overall level of all AGVs
+    H.axLamp = axes('Position', [0.905 0.50 0.075 0.44], 'Visible', 'off'); hold(H.axLamp, 'on');
+    axis(H.axLamp, [0 1 0 4.4]); axis(H.axLamp, 'equal'); axis(H.axLamp, 'off');
+    rectangle('Parent', H.axLamp, 'Position', [0.05 0.05 0.9 4.3], 'Curvature', 0.25, ...
+              'FaceColor', [0.15 0.15 0.15], 'EdgeColor', 'k');
+    for v = 1:4                                        % top: STOP ... bottom: NORMAL
+        H.lamp(v) = rectangle('Parent', H.axLamp, 'Position', [0.15 0.15 + (v - 1) * 1.05 0.7 0.85], ...
+                              'Curvature', [1 1], 'FaceColor', 0.25 * col(v, :), 'EdgeColor', [0.1 0.1 0.1]);
+    end
+    H.lampTxt = text(0.5, -0.35, '', 'Parent', H.axLamp, 'HorizontalAlignment', 'center', ...
+                     'FontWeight', 'bold', 'FontSize', 10);
+    H.axTxt = axes('Position', [0.70 0.08 0.21 0.86], 'Visible', 'off');
     H.txt = text(0, 1, '', 'Parent', H.axTxt, 'FontName', 'Consolas', 'FontSize', 10, ...
                  'VerticalAlignment', 'top', 'Interpreter', 'none');
     H.th = linspace(0, 2*pi, 48);
@@ -61,6 +73,13 @@ for k = 1:numel(S.agv)
         'FaceAlpha', fa, 'LineStyle', ls);
     set(H.agvTxt(k), 'Position', [c + (hw + 0.25) * Ln.nrm 0]);
 end
+
+% warning light: overall level any AGV is acting on
+for v = 1:4
+    if v == out.overall, set(H.lamp(v), 'FaceColor', col(v, :));
+    else, set(H.lamp(v), 'FaceColor', 0.25 * col(v, :)); end
+end
+set(H.lampTxt, 'String', cfg.agv.names{out.overall}, 'Color', col(out.overall, :));
 
 % person
 if ~isempty(trail), set(H.trail, 'XData', trail(:, 1), 'YData', trail(:, 2)); end

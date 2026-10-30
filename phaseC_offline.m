@@ -1,6 +1,7 @@
 %% phaseC_offline.m - run the full safety system on recordings (no hardware, no wall clock).
 % For each recording: time each AGV spends at each level, number of STOP events,
-% closest person-AGV distance (AGV on the lane), and a timeline figure.
+% closest person-AGV distance (AGV on the lane), a timeline figure, and the event
+% log written to logs/<recording>_events.csv and _visits.csv.
 if ~exist('doPlot', 'var'), doPlot = true; end
 cfg = uwb_config();
 ext = '.xlsx';
@@ -11,7 +12,7 @@ col = [0.20 0.70 0.30; 1.00 0.75 0.00; 1.00 0.45 0.00; 0.85 0.10 0.10];
 
 for r = 1:numel(recs)
     F  = nf2_load(fullfile('data', [recs{r} ext]), cfg.anchor.n);
-    Lg = safety_run_offline(F, cfg);
+    [Lg, EV] = safety_run_offline(F, cfg);
     S0 = safety_init(cfg); nA = numel(S0.agv); n = numel(Lg.t);
     fprintf('\n=== %s: %.0f s, fence INSIDE %.0f%% of the time, stale %.1f%%\n', ...
         recs{r}, Lg.t(end) - Lg.t(1), 100 * mean(Lg.fenceOn), 100 * mean(Lg.stale));
@@ -25,6 +26,13 @@ for r = 1:numel(recs)
         ev = sum(diff([0; Lg.applied(:, a) == 4]) == 1);
         fprintf('    %-6s  %5.0f%% %4.0f%% %5.0f%% %4.0f%% | %6d      | %5.2f m\n', Lg.agvNames{a}, c, ev, dmin);
     end
+    csv = safety_events_write(EV, fullfile('logs', recs{r}), cfg);
+    stopRows = EV.ev(strcmp(EV.ev(:, 2), 'LEVEL_CHANGE') & strcmp(EV.ev(:, 5), 'STOP'), :);
+    lat = [stopRows{:, 12}]; settle = [stopRows{:, 13}]; marg = [stopRows{:, 14}];
+    fprintf('    events %d, fence visits %d | STOP: latency %.2f s, braking %.1f s (median), stop margin min %.1f m\n', ...
+        size(EV.ev, 1), size(EV.vis, 1) + ~isempty(EV.visit), median(lat(isfinite(lat))), ...
+        median(settle(isfinite(settle))), min([marg(isfinite(marg)) Inf]));
+    fprintf('    -> %s, %s\n', csv{1}, csv{2});
 
     if doPlot
         figure('Name', ['Phase C - ' recs{r}], 'Color', 'w', 'Position', [80 80 1100 650]);

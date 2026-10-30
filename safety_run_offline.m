@@ -1,7 +1,8 @@
-function Lg = safety_run_offline(F, cfg, dtStep)
+function [Lg, EV] = safety_run_offline(F, cfg, dtStep)
 %SAFETY_RUN_OFFLINE  Run localisation + safety logic + AGV simulation on a recording.
 %   Lg = safety_run_offline(F, cfg)          F = frame batch (nf2_load)
 %   Lg = safety_run_offline(F, cfg, dtStep)  simulation step, default 0.04 s
+%   [Lg, EV] = ...                           also the event log (safety_events)
 %   Deterministic (no wall clock): used by phaseC_offline and the Phase D tests.
 %   Time jumps backwards in a recording are removed; long gaps stay (-> stale).
 %   Lg has one row per simulation step:
@@ -16,7 +17,7 @@ for k = 2:numel(t)
 end
 F.t = t;
 
-S = safety_init(cfg); st = [];
+S = safety_init(cfg); st = []; EV = [];
 nL = numel(S.lane); nA = numel(S.agv);
 grid = (t(1):dtStep:t(end) + dtStep)';
 n = numel(grid);
@@ -39,6 +40,7 @@ for k = 1:n
                      'sigmaPos', E.sigmaPos(end), 'stale', E.stale(end), 'speed', E.speed(end));
     end
     [S, o] = safety_step(S, grid(k), est, cfg);
+    EV = safety_events(EV, S, o, cfg);
     if ~isempty(S.est)
         Lg.pos(k, :) = S.est.pos; Lg.sigmaPos(k) = S.est.sigmaPos; Lg.speed(k) = S.est.speed;
     end

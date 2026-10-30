@@ -1,9 +1,10 @@
 %% phaseC_run.m - AGV safety system: live tag (or replay) -> risk logic -> simulated AGVs.
 % Before running live: close NAssistant, check cfg.serial.port, the anchors and
 % cfg.site (fence + lanes) in uwb_config.m. Close the figure to stop.
-% Saves logs/phaseC_<time>.mat; in serial mode also the raw bytes logs/raw_<time>.bin.
+% Saves logs/phaseC_<time>.mat, the event log logs/phaseC_<time>_events.csv and
+% _visits.csv (open in Excel); in serial mode also the raw bytes logs/raw_<time>.bin.
 
-MODE        = "replay";                 % "serial" (live tag) or "replay"
+MODE        = "serial";                 % "serial" (live tag) or "replay"
 REPLAYFILE  = "data/walk2.xlsx";        % used when MODE = "replay"
 REPLAYSPEED = 1;                        % 1 = real time, 2 = double speed
 
@@ -17,7 +18,7 @@ else
 end
 cleanup = onCleanup(@() src.close());           % always release the COM port
 
-S = safety_init(cfg); st = [];
+S = safety_init(cfg); st = []; EV = [];
 H = safety_draw([], cfg);
 nA = numel(S.agv); nMax = 200000; k = 0;        % log, preallocated
 Lg.t = nan(nMax, 1); Lg.pos = nan(nMax, 2); Lg.stale = false(nMax, 1);
@@ -37,6 +38,7 @@ while ishandle(H.fig)
         trail = trail(max(1, end - 749):end, :);
     end
     [S, out] = safety_step(S, ts, est, cfg);
+    EV = safety_events(EV, S, out, cfg);
     if k < nMax
         k = k + 1;
         Lg.t(k) = ts; Lg.stale(k) = out.stale; Lg.overall(k) = out.overall;
@@ -50,9 +52,10 @@ end
 fn = fieldnames(Lg); for j = 1:numel(fn), Lg.(fn{j}) = Lg.(fn{j})(1:k, :); end
 Lg.agvNames = {S.agv.name};
 if ~exist('logs', 'dir'), mkdir('logs'); end
-fname = fullfile('logs', ['phaseC_' datestr(now, 'yyyymmdd_HHMMSS') '.mat']);
-save(fname, 'Lg', 'cfg');
-fprintf('Stopped after %.0f s. Log saved to %s\n', ts, fname);
+base = fullfile('logs', ['phaseC_' datestr(now, 'yyyymmdd_HHMMSS')]);
+save([base '.mat'], 'Lg', 'EV', 'cfg');
+csv = safety_events_write(EV, base, cfg);
+fprintf('Stopped after %.0f s. Saved %s.mat, %s, %s\n', ts, base, csv{1}, csv{2});
 for a = 1:nA
     c = histc(Lg.applied(:, a), 1:4) / max(k, 1) * 100;
     fprintf('  %-6s NORMAL %3.0f%%  SLOW %3.0f%%  CRAWL %3.0f%%  STOP %3.0f%%\n', Lg.agvNames{a}, c);
