@@ -3,8 +3,8 @@ function H = safety_draw(H, cfg, S, out, trail)
 %   H = safety_draw([], cfg)                    create the figure, returns handles
 %   H = safety_draw(H, cfg, S, out, trail)      update; trail = Nx2 recent positions
 %   Shows anchors, fence, lanes coloured by lane level, AGVs coloured by the
-%   level they are acting on, the person with buffer circle and velocity arrow,
-%   and a status panel.
+%   level they are acting on (faded, dashed = on the feeder track before the
+%   lane start), the person with buffer circle and velocity arrow, and a status panel.
 
 col = [0.20 0.70 0.30; 1.00 0.75 0.00; 1.00 0.45 0.00; 0.85 0.10 0.10];   % NORMAL SLOW CRAWL STOP
 if isempty(H)
@@ -20,8 +20,10 @@ if isempty(H)
         a = S0.lane(l).a; b = S0.lane(l).b; m = S0.lane(l).nrm;
         P = [a + w*m; b + w*m; b - w*m; a - w*m];
         H.lane(l) = patch(P(:, 1), P(:, 2), col(1, :), 'FaceAlpha', 0.25, 'EdgeColor', 'none');
-        q = a - 0.15 * S0.lane(l).u;                         % label just before the lane start
-        if S0.lane(l).u(1) >= 0, arr = '\rightarrow'; al = 'right'; else, arr = '\leftarrow'; al = 'left'; end
+        f0 = a - cfg.agv.feedLen * S0.lane(l).u;                 % feeder track (AGVs re-entering)
+        plot([f0(1) a(1)], [f0(2) a(2)], ':', 'Color', [0.55 0.55 0.55], 'LineWidth', 1.5);
+        q = b + 0.2 * S0.lane(l).u;                          % label just after the lane exit
+        if S0.lane(l).u(1) >= 0, arr = '\rightarrow'; al = 'left'; else, arr = '\leftarrow'; al = 'right'; end
         text(q(1), q(2), [cfg.site.lanes(l).name ' ' arr], 'FontSize', 8, ...
              'HorizontalAlignment', al, 'Color', [0.3 0.3 0.3]);
     end
@@ -34,6 +36,10 @@ if isempty(H)
     H.vel   = plot(NaN, NaN, 'b-', 'LineWidth', 2);
     H.pos   = plot(NaN, NaN, 'bo', 'MarkerFaceColor', 'b', 'MarkerSize', 9);
     pad = 2; ax = [min(A(:, 1)) - pad, max(A(:, 1)) + pad, min(A(:, 2)) - pad, max(A(:, 2)) + pad];
+    for l = 1:numel(S0.lane)                                  % make room for the feeder tracks
+        f0 = S0.lane(l).a - cfg.agv.feedLen * S0.lane(l).u;
+        ax = [min(ax(1), f0(1) - 0.5), max(ax(2), f0(1) + 0.5), min(ax(3), f0(2) - 0.5), max(ax(4), f0(2) + 0.5)];
+    end
     axis(ax); xlabel('x (m)'); ylabel('y (m)');
     title('Person (blue, dotted = safety buffer), lanes and AGVs coloured by level');
     H.axTxt = axes('Position', [0.70 0.08 0.29 0.86], 'Visible', 'off');
@@ -50,7 +56,9 @@ hl = cfg.agv.length / 2; hw = cfg.agv.width / 2;
 for k = 1:numel(S.agv)
     Ln = S.lane(S.agv(k).lane); c = Ln.a + S.agv(k).s * Ln.u;
     P = [c + hl*Ln.u + hw*Ln.nrm; c + hl*Ln.u - hw*Ln.nrm; c - hl*Ln.u - hw*Ln.nrm; c - hl*Ln.u + hw*Ln.nrm];
-    set(H.agv(k), 'XData', P(:, 1), 'YData', P(:, 2), 'FaceColor', col(S.agv(k).applied, :));
+    if S.agv(k).s < 0, fa = 0.35; ls = '--'; else, fa = 1; ls = '-'; end   % on the feeder track
+    set(H.agv(k), 'XData', P(:, 1), 'YData', P(:, 2), 'FaceColor', col(S.agv(k).applied, :), ...
+        'FaceAlpha', fa, 'LineStyle', ls);
     set(H.agvTxt(k), 'Position', [c + (hw + 0.25) * Ln.nrm 0]);
 end
 

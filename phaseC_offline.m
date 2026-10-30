@@ -1,6 +1,6 @@
 %% phaseC_offline.m - run the full safety system on recordings (no hardware, no wall clock).
 % For each recording: time each AGV spends at each level, number of STOP events,
-% closest person-AGV distance, and a timeline figure.
+% closest person-AGV distance (AGV on the lane), and a timeline figure.
 if ~exist('doPlot', 'var'), doPlot = true; end
 cfg = uwb_config();
 ext = '.xlsx';
@@ -19,7 +19,8 @@ for r = 1:numel(recs)
     for a = 1:nA
         Ln = S0.lane(S0.agv(a).lane);
         xy = Ln.a + Lg.s(:, a) * Ln.u;
-        dmin = min(hypot(xy(:, 1) - Lg.pos(:, 1), xy(:, 2) - Lg.pos(:, 2)));
+        dd = hypot(xy(:, 1) - Lg.pos(:, 1), xy(:, 2) - Lg.pos(:, 2));
+        dmin = min(dd(Lg.s(:, a) >= 0));          % on the lane only (feeder track is virtual)
         c = histc(Lg.applied(:, a), 1:4) / n * 100;
         ev = sum(diff([0; Lg.applied(:, a) == 4]) == 1);
         fprintf('    %-6s  %5.0f%% %4.0f%% %5.0f%% %4.0f%% | %6d      | %5.2f m\n', Lg.agvNames{a}, c, ev, dmin);

@@ -1,7 +1,8 @@
 function S = safety_init(cfg)
 %SAFETY_INIT  Initial state of the AGV safety system (lanes, AGVs, warning memories).
 %   S = safety_init(cfg)
-%   AGVs start spread evenly along each lane at normal speed.
+%   AGVs start spread evenly along lane + feeder track at normal speed.
+%   s = position along the lane from p0; s < 0 means on the feeder track before p0.
 
 nL = numel(cfg.site.lanes);
 for l = 1:nL
@@ -19,7 +20,8 @@ for l = 1:nL
         k = k + 1;
         S.agv(k).lane    = l;
         S.agv(k).name    = sprintf('L%d-%c', l, 'A' + j - 1);
-        S.agv(k).s       = S.lane(l).L * (j - 0.5) / cfg.agv.perLane;   % position along lane (m)
+        Lloop = S.lane(l).L + cfg.agv.feedLen;                           % lane + feeder track
+        S.agv(k).s       = Lloop * (j - 0.5) / cfg.agv.perLane - cfg.agv.feedLen;  % position (m); < 0 = on feeder
         S.agv(k).v       = cfg.agv.vMax;                                 % speed (m/s)
         S.agv(k).desired = 1;                                            % level decided now
         S.agv(k).applied = 1;                                            % level the AGV is acting on

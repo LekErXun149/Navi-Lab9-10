@@ -47,9 +47,11 @@ cfg.site.fence = [ 0.5 0.5        % danger-area polygon, corners in order (m)
                    1.1 6.3
                   11.5 4.8
                   11.6 0.5 ];
-% Each lane: AGVs drive from p0 to p1 and loop back to p0 at the end.
-cfg.site.lanes(1).name  = 'Lane 1';  cfg.site.lanes(1).p0 = [ 1.5 3.4];  cfg.site.lanes(1).p1 = [10.5 3.4];
-cfg.site.lanes(2).name  = 'Lane 2';  cfg.site.lanes(2).p0 = [10.5 2.0];  cfg.site.lanes(2).p1 = [ 1.5 2.0];
+% Each lane: AGVs drive from p0 to p1, then return out of sight and re-enter at p0
+% along a feeder track (cfg.agv.feedLen). Keep lane ends >= bufBase + slowBand
+% (~1.5 m) inside the fence: outside the fence the AGVs do not react.
+cfg.site.lanes(1).name  = 'Lane 1';  cfg.site.lanes(1).p0 = [2.5 3.4];  cfg.site.lanes(1).p1 = [9.5 3.4];
+cfg.site.lanes(2).name  = 'Lane 2';  cfg.site.lanes(2).p0 = [9.5 2.0];  cfg.site.lanes(2).p1 = [2.5 2.0];
 cfg.site.laneWidth = 0.6;            % m, width of the lane band (AGV width + margin)
 
 %% ---- Simulated AGVs (Phase C uses the same numbers) -------------------
@@ -64,6 +66,8 @@ cfg.agv.length   = 0.8;              % m
 cfg.agv.width    = 0.5;              % m
 cfg.agv.passMargin = 0.7;            % m: an AGV this far past the person's crossing point is "passed" (E2)
 cfg.agv.minGap   = 0.5;              % m: bumper-to-bumper gap an AGV keeps to the one in front (no collisions)
+cfg.agv.feedLen  = 3.0;              % m: feeder track before each lane start; must exceed latency travel +
+                                     %    braking distance (0.2 + 1.0 m at 1 m/s) so a re-entering AGV can stop
 
 %% ---- Risk thresholds (Phase B: derived by phaseB_tuning.m) -------------
 % Evidence for each value: TUNING_RESULTS.md. Re-run phaseB_tuning after a new

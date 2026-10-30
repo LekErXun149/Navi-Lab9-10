@@ -14,9 +14,9 @@ Test procedures are in `README.md` ("Testing the code"). This file records resul
 | B-2 Values | PASS | 29-Oct | |
 | B-3 Re-tune with chosen files (.bin) | PASS | 29-Oct | |
 | B-4 Back to defaults | PASS | 29-Oct | |
-| C-1 Safety logic self-test | Not run | | |
-| C-2 Offline run | Not run | | |
-| C-3 Replay with display | Not run | | |
+| C-1 Safety logic self-test | PASS (14/14) | 30-Oct | Before the feeder-track fix - re-run (now 15 checks) |
+| C-2 Offline run | PASS | 30-Oct | Before the feeder-track fix - re-run |
+| C-3 Replay with display | FAIL | 30-Oct | Re-looping AGV reached the person at the lane start. Fixed (feeder track) - re-run |
 | C-4 Fake serial port | Not run | | |
 | C-5 Real tag, no anchors (fail-safe) | Not run | | |
 | C-6 Full system | Not run | | Needs a new anchor setup |

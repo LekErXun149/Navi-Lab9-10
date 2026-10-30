@@ -19,8 +19,9 @@ function [S, out] = safety_step(S, ts, est, cfg)
 %   No data for staleTime, filter stale, or sigmaPos > maxSigma -> every AGV
 %   at least staleLevel, a STOP is kept                                  (E4)
 %   Commands reach the AGV after cfg.agv.latency; AGVs brake/accelerate at
-%   cfg.agv.decel / accel, keep cfg.agv.minGap to the AGV in front (out.queued),
-%   and loop back to the lane start at the end.
+%   cfg.agv.decel / accel, keep cfg.agv.minGap to the AGV in front (out.queued).
+%   After the lane end an AGV returns out of sight and re-enters along a feeder
+%   track of cfg.agv.feedLen before p0 (s < 0), where the rules already apply.
 
 R = cfg.risk; nL = numel(S.lane); nA = numel(S.agv);
 if isnan(S.ts), dt = 0; else, dt = max(0, ts - S.ts); end
@@ -95,18 +96,18 @@ end
 sNow = [S.agv.s]; laneOf = [S.agv.lane];
 out.queued = false(1, nA);
 for k = 1:nA
-    l = S.agv(k).lane; L = S.lane(l).L;
+    l = S.agv(k).lane; L = S.lane(l).L; Lloop = L + cfg.agv.feedLen;
     vT = cfg.agv.vMax * cfg.agv.levels(S.agv(k).applied);
     others = find(laneOf == l & (1:nA) ~= k);
     if ~isempty(others)
-        gap = min(mod(sNow(others) - sNow(k), L)) - cfg.agv.length;   % bumper to bumper
+        gap = min(mod(sNow(others) - sNow(k), Lloop)) - cfg.agv.length;   % bumper to bumper
         vGap = sqrt(max(0, 2 * cfg.agv.decel * (gap - cfg.agv.minGap)));
         if vGap < vT, vT = vGap; out.queued(k) = true; end
     end
     if S.agv(k).v > vT, S.agv(k).v = max(vT, S.agv(k).v - cfg.agv.decel * dt);
     else,               S.agv(k).v = min(vT, S.agv(k).v + cfg.agv.accel * dt); end
     S.agv(k).s = S.agv(k).s + S.agv(k).v * dt;
-    if S.agv(k).s > L, S.agv(k).s = S.agv(k).s - L; end
+    if S.agv(k).s > L, S.agv(k).s = S.agv(k).s - Lloop; end      % return via the feeder track
 end
 
 out.desired = [S.agv.desired];

@@ -33,7 +33,7 @@ Also runs in GNU Octave 8 for everything except live serial.
 | `safety_draw.m` | Phase C display: fence, lanes and AGVs coloured by level, person with buffer, status panel |
 | `phaseC_run.m` | **Main program:** live tag (or replay) -> safety logic -> simulated AGVs, with display and log |
 | `phaseC_offline.m` | Runs the safety system on the recordings; time per level, STOP events, closest distance, timeline figures |
-| `phaseC_selftest.m` | 14 checks of the safety logic with made-up positions |
+| `phaseC_selftest.m` | 15 checks of the safety logic with made-up positions |
 | `geo_seg.m`, `geo_poly_dist.m` | Geometry: distance to a lane segment, inside/distance to the fence |
 | `uwb_prctile.m`, `uwb_nansum.m`, `uwb_nanmean.m`, `ternary_str.m` | Small helpers (no Statistics Toolbox needed) |
 | `data/` | The four 26-Oct recordings |
@@ -153,12 +153,14 @@ phaseB_tuning
 ```matlab
 phaseC_selftest
 ```
-**Pass:** `14 PASS, 0 FAIL`. Made-up positions check: outside the fence -> NORMAL; person in
+**Pass:** `15 PASS, 0 FAIL`. Made-up positions check: outside the fence -> NORMAL; person in
 Lane 1 -> only the AGV heading to them STOPs, the one that has passed stays NORMAL, Lane 2
 only SLOW (E2); braking time; command latency; a fast walker triggers STOP further from the
 lane than a slow one (E1); data lost -> CRAWL, a STOP is kept, high uncertainty counts as
 lost (E4); larger uncertainty -> larger buffer (E3a); no flicker on a boundary (E5);
-outside the fence next to a lane end -> NORMAL; an AGV queues behind a stopped AGV.
+outside the fence next to a lane end -> NORMAL; an AGV catching up with a slower one
+queues behind it; an AGV coming round the loop stops on the feeder track before a person
+standing at the lane start.
 
 **C-2 Offline run on the recordings.**
 ```matlab
@@ -168,18 +170,19 @@ phaseC_offline
 
 | Recording | Check |
 |---|---|
-| `walk1_1704` | fence INSIDE ~64% of the time; L1-A STOP ~47%, L2-A STOP ~11% |
-| `walk2` | fence INSIDE ~36%; every AGV NORMAL 74-85% |
-| `static_1533` | person stands near the Lane 1 end: L1-A/L1-B STOP ~99%, Lane 2 AGVs mostly NORMAL (they drive away from the person) |
+| `walk1_1704` | fence INSIDE ~64%; L1-A STOP ~34%; closest on-lane AGV to the person >= ~1.2 m |
+| `walk2` | fence INSIDE ~36%; every AGV NORMAL 71-84% |
+| `static_1533` | person stands ~1.4 m from the Lane 2 start: Lane 1 AGVs SLOW ~99%, Lane 2 AGVs mostly NORMAL/SLOW |
 
 **C-3 Replay with display.** In `phaseC_run.m` set `MODE = "replay";`, then `phaseC_run`.
 
 | Check | Pass if |
 |---|---|
-| Layout | Anchors, red dashed fence, two lanes with direction arrows, four AGVs |
+| Layout | Anchors, red dashed fence, two lanes with direction labels at the exit end, dotted feeder track before each lane start, four AGVs |
 | Colours | Lanes and AGVs change green / amber / red as the person gets near |
 | Direction rule (E2) | When the person is at a lane, the AGV that has already passed stays green and keeps moving |
 | No collisions | AGVs never overlap; a following AGV shows `queued` and waits |
+| Re-entry | An AGV coming round (faded, dashed outline on the feeder track) stops there if the person is near the lane start |
 | Panel | Distance, TTL and reason per lane; level and speed per AGV |
 | End | Closing the window prints the time per level and saves `logs/phaseC_<time>.mat` |
 
@@ -261,6 +264,7 @@ Levels: 1 NORMAL (100%), 2 SLOW (50%), 3 CRAWL (20%), 4 STOP, from `cfg.agv.leve
 | Hysteresis (E5) | Each condition ON at once, OFF only when clear by `hystGap` for `dwell` seconds |
 | Fail-safe (E4) | No data for `staleTime`, filter stale, or `sigmaPos > maxSigma` -> every AGV at least CRAWL; a STOP is kept |
 | AGVs | Commands arrive after `latency`; brake/accelerate at `decel`/`accel`; keep `minGap` to the AGV in front |
+| Re-entry | After the lane end an AGV returns out of sight and re-enters along a virtual feeder track of `feedLen` before the lane start (s < 0), where the rules already apply - so it can stop before entering. The feeder is not a physical path: distances to the person count only AGVs on the lane |
 
 `out.overall` (highest level any AGV acts on) is the value for the Leonardo warning light (Phase E).
 
@@ -275,4 +279,5 @@ Close the figure to stop. Data saved to `logs/run_*.mat` and raw bytes to `logs/
 - `cfg.anchor.h`, `cfg.tag.h` - measured heights
 - `cfg.serial.port`
 - `cfg.site` - fence corners and lane start/end points, measured on the floor
+  (lane ends at least ~1.5 m inside the fence: outside the fence the AGVs do not react)
 - `cfg.risk` - after re-tuning (see "Tuning the risk thresholds")

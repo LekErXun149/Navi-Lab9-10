@@ -1,6 +1,6 @@
 %% phaseC_selftest.m - checks the Phase C safety logic with made-up positions.
 % Uses the default site in uwb_config.m (Lane 1 y = 3.4 left->right,
-% Lane 2 y = 2.0 right->left, x = 1.5 ... 10.5). All lines should say PASS.
+% Lane 2 y = 2.0 right->left, x = 2.5 ... 9.5). All lines should say PASS.
 clear; clc;
 cfg = uwb_config();
 T = cell(0, 2);
@@ -16,8 +16,8 @@ T(end+1, :) = {'outside fence: all AGVs NORMAL', all(o.applied == NORMAL)};
 
 %% 2. Person standing in Lane 1 -> only the AGV still heading to them stops (E2)
 S = safety_init(cfg);
-S.agv(idx(S, 'L1-A')).s = 1.0;      % x = 2.5, person ahead of it
-S.agv(idx(S, 'L1-B')).s = 6.0;      % x = 7.5, already 1.5 m past the person
+S.agv(idx(S, 'L1-A')).s = 1.0;      % x = 3.5, person (x = 6) ahead of it
+S.agv(idx(S, 'L1-B')).s = 6.0;      % x = 8.5, already 2.5 m past the person
 for ts = 0:dt:1.0, [S, o] = safety_step(S, ts, mk([6 3.4], [0 0]), cfg); end
 T(end+1, :) = {'in Lane 1: approaching AGV L1-A STOPs', o.applied(idx(S, 'L1-A')) == STOP};
 T(end+1, :) = {'in Lane 1: AGV L1-B that has passed stays NORMAL', o.applied(idx(S, 'L1-B')) == NORMAL};
@@ -88,19 +88,39 @@ S = safety_init(cfg);
 for ts = 0:dt:2, [S, o] = safety_step(S, ts, mk([0.2 3.4], [0 0]), cfg); end
 T(end+1, :) = {'outside fence next to a lane end: NORMAL', all(o.applied == NORMAL) && ~o.fenceOn};
 
-%% 12. An AGV catching up with a stopped AGV queues behind it (no collision)
-% L1-A is stopped just before the person (x = 3.5). L1-B has passed the person
-% (so it is NORMAL), drives to the lane end, loops back and catches up with L1-A.
-S = safety_init(cfg); L = S.lane(1).L;
-S.agv(idx(S, 'L1-A')).s = 1.0;
-S.agv(idx(S, 'L1-B')).s = 7.5;
-gapMin = Inf;
-for ts = 0:dt:8
-    [S, o] = safety_step(S, ts, mk([3.5 3.4], [0 0]), cfg);
-    gapMin = min(gapMin, mod(S.agv(idx(S, 'L1-A')).s - S.agv(idx(S, 'L1-B')).s, L) - cfg.agv.length);
+%% 12. An AGV catching up with a slower AGV queues behind it (no collision)
+% Nobody inside the fence. L1-A starts from standstill (accelerates at 0.3 m/s^2),
+% L1-B comes up behind it at 1 m/s and must slow down to keep the gap.
+S = safety_init(cfg); Lloop = S.lane(1).L + cfg.agv.feedLen;
+iA = idx(S, 'L1-A'); iB = idx(S, 'L1-B');
+S.agv(iA).s = 2.0; S.agv(iA).v = 0;
+S.agv(iB).s = -0.4; S.agv(iB).v = cfg.agv.vMax;   % 1.6 m gap: just enough to brake
+gapMin = Inf; queued = false;
+for ts = 0:dt:6
+    [S, o] = safety_step(S, ts, mk([6 -2], [0 0]), cfg);
+    gapMin = min(gapMin, mod(S.agv(iA).s - S.agv(iB).s, Lloop) - cfg.agv.length);
+    queued = queued || o.queued(iB);
 end
-T(end+1, :) = {sprintf('AGVs keep >= %.1f m gap (closest %.2f m)', cfg.agv.minGap, gapMin), ...
-    gapMin >= cfg.agv.minGap - 0.05 && o.v(idx(S, 'L1-B')) == 0};
+T(end+1, :) = {sprintf('queueing: gap kept >= %.1f m (closest %.2f m)', cfg.agv.minGap, gapMin), ...
+    gapMin >= cfg.agv.minGap - 0.05 && queued};
+
+%% 13. An AGV coming round the loop stops on the feeder track, not in the person
+% Person standing in Lane 1 just after its start. L1-A is at the lane end at full
+% speed, returns via the feeder track and must stop before the lane start.
+S = safety_init(cfg); iA = idx(S, 'L1-A'); iB = idx(S, 'L1-B');
+pP = cfg.site.lanes(1).p0 + [0.3 0];
+S.agv(iA).s = S.lane(1).L - 0.2;    % about to loop
+S.agv(iB).s = 3.0;                  % already past the person
+dMin = Inf;
+for ts = 0:dt:12
+    [S, o] = safety_step(S, ts, mk(pP, [0 0]), cfg);
+    for k = [iA iB]
+        c = S.lane(1).a + S.agv(k).s * S.lane(1).u;
+        if S.agv(k).v > 0.05, dMin = min(dMin, norm(c - pP)); end
+    end
+end
+T(end+1, :) = {sprintf('re-entering AGV stops before the person (closest moving %.1f m)', dMin), ...
+    dMin > cfg.agv.length / 2 + 0.3 && S.agv(iA).v == 0 && S.agv(iA).s < 0};
 
 for k = 1:size(T, 1)
     if T{k, 2}, res = 'PASS'; else, res = '*** FAIL ***'; end
