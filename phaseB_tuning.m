@@ -89,7 +89,8 @@ fprintf('    note: for the 26-Oct data this is the WORST case (corner, tag 0.74 
 % For each candidate vApproach:
 %   B3  reaction time = when the filter first reports "approaching", using a
 %       synthetic walk (0.8 m/s toward a lane from t = 2 s to 6 s, then stand)
-%       with REAL position errors from both static recordings added (40 trials)
+%       with REAL position errors from both static recordings added (200 evenly
+%       spaced samples, no random numbers: identical in MATLAB and Octave)
 %   B4  tStop = detect + position lag + latency + brake from SLOW + margin
 %       tSlow = tStop + latency + brake from NORMAL to SLOW
 %   cost: false SLOW triggers per minute when standing still just outside the
@@ -104,12 +105,13 @@ for i = find(isStatic)
     fx = D(i).E.fix(all(isfinite(D(i).E.fix), 2), :);
     N = [N; fx - median(fx)]; %#ok<AGROW>
 end
-dt = 0.04; t = (0:dt:10)'; vWalk = 0.8; nT = 40;
+dt = 0.04; t = (0:dt:10)'; vWalk = 0.8; nT = 200;
 truthY = vWalk * min(max(t - 2, 0), 4);
-rand('seed', 3); %#ok<RAND>
+% evenly spaced noise samples (no random numbers): identical results in MATLAB and Octave
+offs = round(linspace(1, size(N, 1) - numel(t) - 1, nT));
 VY = nan(numel(t), nT); PY = VY;                       % run the filter once per trial
 for k = 1:nT
-    o = randi(size(N, 1) - numel(t));
+    o = offs(k);
     z = [zeros(size(t)) truthY] + N(o + (1:numel(t)), :);
     kf = uwb_kf_init(cfg);
     for j = 1:numel(t)
